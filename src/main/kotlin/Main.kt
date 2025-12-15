@@ -4,7 +4,8 @@ import java.io.File
 
 fun main() {
     val wordsFile = File("words.txt")
-//    wordsFile.createNewFile()
+
+    if (!wordsFile.exists()) { return }
 
     val strings = wordsFile.readLines()
 
