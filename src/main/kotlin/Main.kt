@@ -3,17 +3,42 @@ package org.example
 import java.io.File
 
 fun main() {
+    val dictionary = loadDictionary()
+
+    println(dictionary)
+
+    while (true) {
+        println("""
+            Меню: 
+            1 – Учить слова
+            2 – Статистика
+            0 – Выход
+        """.trimIndent())
+
+        print("Введите число: ")
+        val input = readln()
+
+        when (input) {
+            "1" -> println("Учить слова")
+            "2" -> println("Статистика")
+            "0" -> return
+            else -> println("Введите число 1, 2 или 0")
+        }
+    }
+}
+
+fun loadDictionary(): List<Word>  {
+    val dictionary = mutableListOf<Word>()
+
     val pathName = "words.txt"
     val wordsFile = File(pathName)
 
     if (!wordsFile.exists()) {
         println("Файл $pathName не найден")
-        return
+        return dictionary
     }
 
     val lines = wordsFile.readLines()
-
-    val dictionary = mutableListOf<Word>()
 
     for (line in lines) {
         val newLine = line.split("|")
@@ -31,7 +56,7 @@ fun main() {
         dictionary.add(model)
     }
 
-    println(dictionary)
+    return dictionary
 }
 
 data class Word(
