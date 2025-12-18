@@ -5,8 +5,6 @@ import java.io.File
 fun main() {
     val dictionary = loadDictionary()
 
-    println(dictionary)
-
     while (true) {
         println("""
             Меню: 
