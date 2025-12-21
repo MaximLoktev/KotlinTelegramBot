@@ -2,6 +2,8 @@ package org.example
 
 import java.io.File
 
+const val MIN_CORRECT_ANSWERS = 3
+
 fun main() {
     val dictionary = loadDictionary()
 
@@ -18,7 +20,22 @@ fun main() {
 
         when (input) {
             "1" -> println("Учить слова")
-            "2" -> println("Статистика")
+            "2" -> {
+                val totalCount = dictionary.size
+
+                if (totalCount == 0) {
+                    println("Словарь пуст\n")
+                    continue
+                }
+
+                val learnedCount = dictionary.count {
+                    it.correctAnswersCount >= MIN_CORRECT_ANSWERS
+                }
+
+                val percent = learnedCount * 100 / totalCount
+
+                println("Выучено $learnedCount из $totalCount слов | $percent%\n")
+            }
             "0" -> return
             else -> println("Введите число 1, 2 или 0")
         }
