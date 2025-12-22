@@ -2,6 +2,7 @@ package org.example
 
 import java.io.File
 
+const val PATH_NAME = "words.txt"
 const val MIN_CORRECT_ANSWERS = 3
 const val WORDS_PER_SESSION = 4
 
@@ -45,14 +46,33 @@ fun main() {
                         questionWords + learnedList.take(WORDS_PER_SESSION - questionWords.size)
                     } else {
                         questionWords
-                    }
+                    }.shuffled()
 
-                    answerOptions.shuffled().forEachIndexed { index, word ->
+                    answerOptions.forEachIndexed { index, word ->
                         println(" ${index + 1} - ${word.translate}")
                     }
 
+                    println(" ----------")
+                    println(" 0 - Меню\n")
+
                     print("Введите номер ответа: ")
-                    val userInput = readln()
+                    when (val userAnswerInput = readln().toIntOrNull()) {
+                        in 1..answerOptions.size -> {
+                            val correctAnswerId = answerOptions.indexOf(correctAnswer) + 1
+
+                            if (userAnswerInput == correctAnswerId) {
+                                correctAnswer.correctAnswersCount++
+
+                                saveDictionary(dictionary)
+
+                                println("\nПравильно!")
+                            } else {
+                                println("\nНеправильно! ${correctAnswer.text} - ${correctAnswer.translate}")
+                            }
+                        }
+                        0 -> break
+                        else -> println("\nНекорректный ввод")
+                    }
                 }
             }
             "2" -> {
@@ -80,11 +100,10 @@ fun main() {
 fun loadDictionary(): List<Word>  {
     val dictionary = mutableListOf<Word>()
 
-    val pathName = "words.txt"
-    val wordsFile = File(pathName)
+    val wordsFile = File(PATH_NAME)
 
     if (!wordsFile.exists()) {
-        println("Файл $pathName не найден")
+        println("Файл $PATH_NAME не найден")
         return dictionary
     }
 
@@ -109,8 +128,18 @@ fun loadDictionary(): List<Word>  {
     return dictionary
 }
 
+fun saveDictionary(dictionary: List<Word>) {
+    val wordsFile = File(PATH_NAME)
+
+    val lines = dictionary.map { word ->
+        "${word.text}|${word.translate}|${word.correctAnswersCount}"
+    }
+
+    wordsFile.writeText(lines.joinToString("\n"))
+}
+
 data class Word(
     val text: String,
     val translate: String,
-    val correctAnswersCount: Int = 0,
+    var correctAnswersCount: Int = 0,
 )
