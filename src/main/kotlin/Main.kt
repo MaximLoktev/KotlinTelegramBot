@@ -37,7 +37,17 @@ fun main() {
 
                     println("\n${correctAnswer.text}:")
 
-                    questionWords.shuffled().forEachIndexed { index, word ->
+                    val answerOptions = if (questionWords.size < WORDS_PER_SESSION) {
+                        val learnedList = dictionary.filter {
+                            it.correctAnswersCount >= MIN_CORRECT_ANSWERS
+                        }.shuffled()
+
+                        questionWords + learnedList.take(WORDS_PER_SESSION - questionWords.size)
+                    } else {
+                        questionWords
+                    }
+
+                    answerOptions.shuffled().forEachIndexed { index, word ->
                         println(" ${index + 1} - ${word.translate}")
                     }
 
