@@ -3,6 +3,7 @@ package org.example
 import java.io.File
 
 const val MIN_CORRECT_ANSWERS = 3
+const val WORDS_PER_SESSION = 4
 
 fun main() {
     val dictionary = loadDictionary()
@@ -19,7 +20,41 @@ fun main() {
         val input = readln()
 
         when (input) {
-            "1" -> println("Учить слова")
+            "1" -> {
+                while (true) {
+                    val notLearnedList = dictionary.filter {
+                        it.correctAnswersCount < MIN_CORRECT_ANSWERS
+                    }
+
+                    if (notLearnedList.isEmpty()) {
+                        println("Все слова в словаре выучены\n")
+                        break
+                    }
+
+                    val questionWords = notLearnedList.take(WORDS_PER_SESSION).shuffled()
+
+                    val correctAnswer = questionWords.random()
+
+                    println("\n${correctAnswer.text}:")
+
+                    val answerOptions = if (questionWords.size < WORDS_PER_SESSION) {
+                        val learnedList = dictionary.filter {
+                            it.correctAnswersCount >= MIN_CORRECT_ANSWERS
+                        }.shuffled()
+
+                        questionWords + learnedList.take(WORDS_PER_SESSION - questionWords.size)
+                    } else {
+                        questionWords
+                    }
+
+                    answerOptions.shuffled().forEachIndexed { index, word ->
+                        println(" ${index + 1} - ${word.translate}")
+                    }
+
+                    print("Введите номер ответа: ")
+                    val userInput = readln()
+                }
+            }
             "2" -> {
                 val totalCount = dictionary.size
 
