@@ -21,18 +21,20 @@ fun main() {
 
         when (input) {
             "1" -> {
-                val notLearnedList = dictionary.filter {
-                    it.correctAnswersCount < MIN_CORRECT_ANSWERS
-                }
+                while (true) {
+                    val notLearnedList = dictionary.filter {
+                        it.correctAnswersCount < MIN_CORRECT_ANSWERS
+                    }
 
-                if (notLearnedList.isEmpty()) {
-                    println("Все слова в словаре выучены\n")
-                    continue
-                }
+                    if (notLearnedList.isEmpty()) {
+                        println("Все слова в словаре выучены\n")
+                        break
+                    }
 
-                val questionWords = notLearnedList.take(WORDS_PER_SESSION).shuffled()
+                    val questionWords = notLearnedList.take(WORDS_PER_SESSION).shuffled()
 
-                questionWords.forEach { correctAnswer ->
+                    val correctAnswer = questionWords.random()
+
                     println("\n${correctAnswer.text}:")
 
                     questionWords.shuffled().forEachIndexed { index, word ->
