@@ -44,7 +44,7 @@ class LearnWordsTrainer {
     fun getNextQuestion(): Question? {
         val notLearnedList = dictionary.filter { it.correctAnswersCount < MIN_CORRECT_ANSWERS }
 
-        if (notLearnedList.isEmpty()) { return  null }
+        if (notLearnedList.isEmpty()) { return null }
 
         val questionWords = notLearnedList.take(WORDS_PER_SESSION).shuffled()
 
@@ -79,7 +79,7 @@ class LearnWordsTrainer {
         } ?: false
     }
 
-    private fun loadDictionary(): List<Word>  {
+    private fun loadDictionary(): List<Word> {
         val dictionary = mutableListOf<Word>()
 
         val wordsFile = File(PATH_NAME)
