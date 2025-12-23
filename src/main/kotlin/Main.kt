@@ -1,5 +1,8 @@
 package org.example
 
+const val MIN_CORRECT_ANSWERS = 3
+const val WORDS_PER_SESSION = 4
+
 fun Question.asConsoleString(): String {
     val variants = variants
         .mapIndexed { index, word -> " ${index + 1} - ${word.translate}" }
@@ -9,7 +12,7 @@ fun Question.asConsoleString(): String {
 }
 
 fun main() {
-    val trainer = LearnWordsTrainer()
+    val trainer = LearnWordsTrainer(MIN_CORRECT_ANSWERS, WORDS_PER_SESSION)
 
     while (true) {
         println("""
