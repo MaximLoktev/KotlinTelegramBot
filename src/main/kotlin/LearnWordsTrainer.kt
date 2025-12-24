@@ -3,8 +3,6 @@ package org.example
 import java.io.File
 
 const val PATH_NAME = "words.txt"
-const val MIN_CORRECT_ANSWERS = 3
-const val WORDS_PER_SESSION = 4
 
 data class Word(
     val text: String,
@@ -23,7 +21,10 @@ data class Question(
     val correctAnswer: Word,
 )
 
-class LearnWordsTrainer {
+class LearnWordsTrainer(
+    private val learnedAnswerCount: Int,
+    private val countOfQuestionWords: Int,
+) {
 
     private val dictionary = loadDictionary()
 
@@ -34,7 +35,7 @@ class LearnWordsTrainer {
 
         if (totalCount == 0) { return null }
 
-        val learnedCount = dictionary.count { it.correctAnswersCount >= MIN_CORRECT_ANSWERS }
+        val learnedCount = dictionary.count { it.correctAnswersCount >= learnedAnswerCount }
 
         val percent = learnedCount * 100 / totalCount
 
@@ -42,20 +43,20 @@ class LearnWordsTrainer {
     }
 
     fun getNextQuestion(): Question? {
-        val notLearnedList = dictionary.filter { it.correctAnswersCount < MIN_CORRECT_ANSWERS }
+        val notLearnedList = dictionary.filter { it.correctAnswersCount < learnedAnswerCount }
 
         if (notLearnedList.isEmpty()) { return null }
 
-        val questionWords = notLearnedList.take(WORDS_PER_SESSION).shuffled()
+        val questionWords = notLearnedList.shuffled().take(countOfQuestionWords)
 
         val correctAnswer = questionWords.random()
 
-        val answerOptions = if (questionWords.size < WORDS_PER_SESSION) {
+        val answerOptions = if (questionWords.size < countOfQuestionWords) {
             val learnedList = dictionary.filter {
-                it.correctAnswersCount >= MIN_CORRECT_ANSWERS
+                it.correctAnswersCount >= learnedAnswerCount
             }.shuffled()
 
-            questionWords + learnedList.take(WORDS_PER_SESSION - questionWords.size)
+            questionWords + learnedList.take(countOfQuestionWords - questionWords.size)
         } else {
             questionWords
         }.shuffled()
