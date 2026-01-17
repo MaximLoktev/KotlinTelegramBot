@@ -23,6 +23,8 @@ fun main(args: Array<String>) {
         val updateIdString = updates.substring(startUpdateId + 11, endUpdateId)
 
         updateId = updateIdString.toInt() + 1
+
+        Thread.sleep(2000)
     }
 }
 
