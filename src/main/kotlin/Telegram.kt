@@ -5,19 +5,34 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 
+const val TELEGRAM_BASE_URL = "https://api.telegram.org"
+
 fun main(args: Array<String>) {
     val botToken = args[0]
+    var updateId = 0
 
-    val urlGatMe = "https://api.telegram.org/bot$botToken/getMe"
-    val urlGatUpdates = "https://api.telegram.org/bot$botToken/getUpdates"
+    while (true) {
+        val updates = getUpdates(botToken, updateId)
+        println(updates)
 
+        val startUpdateId = updates.lastIndexOf("update_id")
+        val endUpdateId = updates.lastIndexOf(",\n\"message\"")
+
+        if (startUpdateId == -1 || endUpdateId == -1) continue
+
+        val updateIdString = updates.substring(startUpdateId + 11, endUpdateId)
+
+        updateId = updateIdString.toInt() + 1
+
+        Thread.sleep(2000)
+    }
+}
+
+fun getUpdates(botToken: String, updateId: Int): String {
+    val urlGetUpdates = "$TELEGRAM_BASE_URL/bot$botToken/getUpdates?offset=$updateId"
     val client = HttpClient.newBuilder().build()
+    val request = HttpRequest.newBuilder().uri(URI.create(urlGetUpdates)).build()
+    val response = client.send(request, HttpResponse.BodyHandlers.ofString())
 
-    val firstRequest = HttpRequest.newBuilder().uri(URI.create(urlGatMe)).build()
-    val firstResponse = client.send(firstRequest, HttpResponse.BodyHandlers.ofString())
-    println(firstResponse.body())
-
-    val secondRequest = HttpRequest.newBuilder().uri(URI.create(urlGatUpdates)).build()
-    val secondResponse = client.send(secondRequest, HttpResponse.BodyHandlers.ofString())
-    println(secondResponse.body())
+    return response.body()
 }
