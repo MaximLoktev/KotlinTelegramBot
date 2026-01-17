@@ -15,13 +15,13 @@ fun main(args: Array<String>) {
         val updates = getUpdates(botToken, updateId)
         println(updates)
 
-        val updateIdString = parsingUpdateItemToString(updates, "update_id")
+        val updateIdString = extractUpdateValue(updates, "update_id")
 
         if (updateIdString.isEmpty()) continue
 
         updateId = updateIdString.toInt() + 1
 
-        val message = parsingUpdateItemToString(updates, "text")
+        val message = extractUpdateValue(updates, "text")
         println("Сообщение: $message")
 
         Thread.sleep(2000)
@@ -37,11 +37,11 @@ fun getUpdates(botToken: String, updateId: Int): String {
     return response.body()
 }
 
-fun parsingUpdateItemToString(updates: String, key: String): String {
-    val stringRegex: Regex = """"$key"\s*:\s*"([^"]+)"""".toRegex()
+fun extractUpdateValue(updates: String, key: String): String {
+    val stringRegex = """"$key"\s*:\s*"([^"]+)"""".toRegex()
     stringRegex.find(updates)?.let { return it.groupValues[1] }
 
-    val numberRegex: Regex = """"$key"\s*:\s*(\d+)""".toRegex()
+    val numberRegex = """"$key"\s*:\s*(\d+)""".toRegex()
     numberRegex.find(updates)?.let { return it.groupValues[1] }
 
     return ""
