@@ -74,7 +74,7 @@ fun main(args: Array<String>) {
 
         val message = service.extractUpdateValue(updates, "text")
 
-        val chatId = service.extractChatId(updates).toInt()
+        val chatId = service.extractChatId(updates).toIntOrNull() ?: continue
 
         service.sendMessage(chatId, message)
 
