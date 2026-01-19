@@ -13,6 +13,38 @@ class TelegramBotService(private val botToken: String) {
 
     private val client = HttpClient.newBuilder().build()
 
+    fun sendMenu(chatId: Int) {
+        val sendMessageUrl = "$TELEGRAM_BASE_URL/bot$botToken/sendMessage"
+        val sendMenuBody = """
+            {
+                "chat_id": $chatId,
+                "text": "Основное меню",
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": "Изучить слова",
+                                "callback_data": "learn_words_clicked"
+                            },
+                            {
+                                "text": "Статистика",
+                                "callback_data": "statistics_clicked"
+                            }
+                        ]
+                    ]
+                }
+            }
+        """.trimIndent()
+
+        val request = HttpRequest.newBuilder()
+            .uri(URI.create(sendMessageUrl))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(sendMenuBody))
+            .build()
+
+        client.send(request, HttpResponse.BodyHandlers.ofString())
+    }
+
     fun sendMessage(chatId: Int, text: String) {
         if (text.isEmpty() || text.length > 4096) return
 
@@ -62,6 +94,8 @@ fun main(args: Array<String>) {
 
     val service = TelegramBotService(botToken = args[0])
 
+    val trainer = LearnWordsTrainer(MIN_CORRECT_ANSWERS, WORDS_PER_SESSION)
+
     while (true) {
         val updates = service.getUpdates(updateId)
         println(updates)
@@ -72,11 +106,28 @@ fun main(args: Array<String>) {
 
         updateId = updateIdString.toInt() + 1
 
-        val message = service.extractUpdateValue(updates, "text")
-
         val chatId = service.extractChatId(updates).toIntOrNull() ?: continue
 
-        service.sendMessage(chatId, message)
+        val messageText = service.extractUpdateValue(updates, "text")
+
+        val callbackData = service.extractUpdateValue(updates, "data")
+
+        when {
+            callbackData.isNotEmpty() -> {
+                val message = when (callbackData) {
+                    "learn_words_clicked" -> "Приступаем к изучению слов!"
+                    "statistics_clicked" -> "Выучено 10 из 10 слов | 100%"
+                    else -> ""
+                }
+                service.sendMessage(chatId, message)
+            }
+            messageText.isNotEmpty() -> {
+                when (messageText) {
+                    "/start" -> service.sendMenu(chatId)
+                    else -> service.sendMessage(chatId, "Вы написали: $messageText")
+                }
+            }
+        }
 
         Thread.sleep(2000)
     }
