@@ -118,7 +118,15 @@ fun main(args: Array<String>) {
             callbackData.isNotEmpty() -> {
                 val message = when (callbackData) {
                     CALLBACK_DATA_LEARN_WORDS -> "Приступаем к изучению слов!"
-                    CALLBACK_DATA_STATISTICS -> "Выучено 10 из 10 слов | 100%"
+                    CALLBACK_DATA_STATISTICS -> {
+                        val statistics = trainer.getStatistics()
+
+                        if (statistics != null) {
+                            "Выучено ${statistics.learnedCount} из ${statistics.totalCount} слов | ${statistics.percent}%"
+                        } else {
+                            "Словарь пуст"
+                        }
+                    }
                     else -> ""
                 }
                 service.sendMessage(chatId, message)
