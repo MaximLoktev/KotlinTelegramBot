@@ -1,62 +1,71 @@
 package org.example
 
 import java.net.URI
-import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
-import java.nio.charset.StandardCharsets
 
 const val TELEGRAM_BASE_URL = "https://api.telegram.org"
 const val CALLBACK_DATA_LEARN_WORDS = "learn_words_clicked"
 const val CALLBACK_DATA_STATISTICS = "statistics_clicked"
+const val CALLBACK_DATA_ANSWER_PREFIX = "answer_"
 
 class TelegramBotService(private val botToken: String) {
 
     private val client = HttpClient.newBuilder().build()
 
     fun sendMenu(chatId: Int) {
-        val sendMessageUrl = "$TELEGRAM_BASE_URL/bot$botToken/sendMessage"
-        val sendMenuBody = """
+        val menuBody = """
             {
-                "chat_id": $chatId,
-                "text": "Основное меню",
-                "reply_markup": {
-                    "inline_keyboard": [
-                        [
-                            {
-                                "text": "Изучить слова",
-                                "callback_data": "$CALLBACK_DATA_LEARN_WORDS"
-                            },
-                            {
-                                "text": "Статистика",
-                                "callback_data": "$CALLBACK_DATA_STATISTICS"
-                            }
-                        ]
+                "inline_keyboard": [
+                    [
+                        { 
+                            "text": "Изучить слова", 
+                            "callback_data": "$CALLBACK_DATA_LEARN_WORDS" 
+                        },
+                        { 
+                            "text": "Статистика", 
+                            "callback_data": "$CALLBACK_DATA_STATISTICS"
+                        }
                     ]
-                }
+                ]
             }
         """.trimIndent()
+
+        sendMessage(chatId, text = "Основное меню", menuBody)
+    }
+
+    fun sendQuestion(chatId: Int, question: Question) {
+        val buttons = question.variants.mapIndexed { index, word ->
+            """
+            {
+                "text": "${word.translate}",
+                "callback_data": "$CALLBACK_DATA_ANSWER_PREFIX$index"
+            }
+            """.trimIndent()
+        }.joinToString(",")
+
+        val replyMarkup = """
+            {
+                "inline_keyboard": [ [ $buttons ] ]
+            }
+        """.trimIndent()
+
+        sendMessage(chatId, question.correctAnswer.text, replyMarkup)
+    }
+
+    fun sendMessage(chatId: Int, text: String, replyMarkup: String? = null) {
+        if (text.isEmpty() || text.length > 4096) return
+
+        val sendMessageUrl = "$TELEGRAM_BASE_URL/bot$botToken/sendMessage"
+
+        val replyMarkupPart = if (replyMarkup != null) ",\"reply_markup\": $replyMarkup" else ""
+        val requestBody = """{"chat_id":$chatId,"text":"$text"$replyMarkupPart}"""
 
         val request = HttpRequest.newBuilder()
             .uri(URI.create(sendMessageUrl))
             .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(sendMenuBody))
-            .build()
-
-        client.send(request, HttpResponse.BodyHandlers.ofString())
-    }
-
-    fun sendMessage(chatId: Int, text: String) {
-        if (text.isEmpty() || text.length > 4096) return
-
-        val encodedText = URLEncoder.encode(text, StandardCharsets.UTF_8)
-
-        val sendMessageUrl = "$TELEGRAM_BASE_URL/bot$botToken/sendMessage?chat_id=$chatId&text=$encodedText"
-
-        val request = HttpRequest.newBuilder()
-            .uri(URI.create(sendMessageUrl))
-            .POST(HttpRequest.BodyPublishers.noBody())
+            .POST(HttpRequest.BodyPublishers.ofString(requestBody))
             .build()
 
         client.send(request, HttpResponse.BodyHandlers.ofString())
@@ -116,20 +125,14 @@ fun main(args: Array<String>) {
 
         when {
             callbackData.isNotEmpty() -> {
-                val message = when (callbackData) {
-                    CALLBACK_DATA_LEARN_WORDS -> "Приступаем к изучению слов!"
-                    CALLBACK_DATA_STATISTICS -> {
-                        val statistics = trainer.getStatistics()
-
-                        if (statistics != null) {
-                            "Выучено ${statistics.learnedCount} из ${statistics.totalCount} слов | ${statistics.percent}%"
-                        } else {
-                            "Словарь пуст"
-                        }
+                when (callbackData) {
+                    CALLBACK_DATA_LEARN_WORDS -> {
+                        checkNextQuestionAndSend(trainer, service, chatId)
                     }
-                    else -> ""
+                    CALLBACK_DATA_STATISTICS -> {
+                        sendStatistics(trainer, service, chatId)
+                    }
                 }
-                service.sendMessage(chatId, message)
             }
             messageText.isNotEmpty() -> {
                 when (messageText) {
@@ -141,4 +144,33 @@ fun main(args: Array<String>) {
 
         Thread.sleep(2000)
     }
+}
+
+fun checkNextQuestionAndSend(
+    trainer: LearnWordsTrainer,
+    service: TelegramBotService,
+    chatId: Int
+) {
+    val question = trainer.getNextQuestion()
+
+    if (question != null) {
+        service.sendQuestion(chatId, question)
+    } else {
+        service.sendMessage(chatId, "Вы выучили все слова в базе")
+    }
+}
+
+fun sendStatistics(
+    trainer: LearnWordsTrainer,
+    service: TelegramBotService,
+    chatId: Int
+) {
+    val statistics = trainer.getStatistics()
+
+    val message = if (statistics != null) {
+        "Выучено ${statistics.learnedCount} из ${statistics.totalCount} слов | ${statistics.percent}%"
+    } else {
+        "Словарь пуст"
+    }
+    service.sendMessage(chatId, message)
 }
