@@ -25,10 +25,10 @@ class LearnWordsTrainer(
     private val learnedAnswerCount: Int,
     private val countOfQuestionWords: Int,
 ) {
+    var question: Question? = null
+        private set
 
     private val dictionary = loadDictionary()
-
-    private var question: Question? = null
 
     fun getStatistics(): Statistics? {
         val totalCount = dictionary.size
