@@ -127,7 +127,7 @@ fun main(args: Array<String>) {
                         service.sendMenu(json, chatId)
                     }
                     callbackData.startsWith(CALLBACK_DATA_ANSWER_PREFIX) -> {
-                        checkAnswerAndSendNextStep(json, trainer, service,chatId, callbackData)
+                        checkAnswerAndSendNextStep(json, trainer, service, chatId, callbackData)
                     }
                 }
             }
