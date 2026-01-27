@@ -3,6 +3,8 @@ package org.example
 import java.io.File
 
 const val PATH_NAME = "words.txt"
+const val MIN_CORRECT_ANSWERS = 3
+const val WORDS_PER_SESSION = 4
 
 data class Word(
     val text: String,
@@ -22,8 +24,9 @@ data class Question(
 )
 
 class LearnWordsTrainer(
-    private val learnedAnswerCount: Int,
-    private val countOfQuestionWords: Int,
+    private val fileName: String = PATH_NAME,
+    private val learnedAnswerCount: Int = MIN_CORRECT_ANSWERS,
+    private val countOfQuestionWords: Int = WORDS_PER_SESSION,
 ) {
     var question: Question? = null
         private set
@@ -72,7 +75,7 @@ class LearnWordsTrainer(
 
             if (correctAnswerId == userAnswerIndex) {
                 it.correctAnswer.correctAnswersCount++
-                saveDictionary(dictionary)
+                saveDictionary()
                 true
             } else {
                 false
@@ -80,14 +83,18 @@ class LearnWordsTrainer(
         } ?: false
     }
 
+    fun resetProgress() {
+        dictionary.forEach { it.correctAnswersCount = 0 }
+        saveDictionary()
+    }
+
     private fun loadDictionary(): List<Word> {
         val dictionary = mutableListOf<Word>()
 
-        val wordsFile = File(PATH_NAME)
+        val wordsFile = File(fileName)
 
         if (!wordsFile.exists()) {
-            println("Файл $PATH_NAME не найден")
-            return dictionary
+            File(PATH_NAME).copyTo(wordsFile)
         }
 
         val lines = wordsFile.readLines()
@@ -111,8 +118,8 @@ class LearnWordsTrainer(
         return dictionary
     }
 
-    private fun saveDictionary(dictionary: List<Word>) {
-        val wordsFile = File(PATH_NAME)
+    private fun saveDictionary() {
+        val wordsFile = File(fileName)
 
         val lines = dictionary.map { word ->
             "${word.text}|${word.translate}|${word.correctAnswersCount}"

@@ -9,6 +9,7 @@ import java.net.http.HttpResponse
 const val TELEGRAM_BASE_URL = "https://api.telegram.org"
 const val CALLBACK_DATA_LEARN_WORDS = "learn_words_clicked"
 const val CALLBACK_DATA_STATISTICS = "statistics_clicked"
+const val CALLBACK_DATA_RESET = "reset_clicked"
 const val CALLBACK_DATA_MAIN_MENU = "main_menu_clicked"
 const val CALLBACK_DATA_ANSWER_PREFIX = "answer_"
 
@@ -33,10 +34,15 @@ class TelegramBotService(private val botToken: String) {
             chatId,
             text = "Основное меню",
             replyMarkup = ReplyMarkup(
-                listOf(listOf(
-                    InlineKeyboard("Изучить слова", CALLBACK_DATA_LEARN_WORDS),
-                    InlineKeyboard("Статистика", CALLBACK_DATA_STATISTICS),
-                ))
+                listOf(
+                    listOf(
+                        InlineKeyboard("Изучить слова", CALLBACK_DATA_LEARN_WORDS),
+                        InlineKeyboard("Статистика", CALLBACK_DATA_STATISTICS),
+                    ),
+                    listOf(
+                        InlineKeyboard("Сбросить прогресс", CALLBACK_DATA_RESET),
+                    )
+                )
             )
         )
 
@@ -86,60 +92,66 @@ class TelegramBotService(private val botToken: String) {
 
 fun main(args: Array<String>) {
     var lastUpdateId = 0L
-
-    val json = Json {
-        ignoreUnknownKeys = true
-    }
+    val json = Json { ignoreUnknownKeys = true }
 
     val service = TelegramBotService(botToken = args[0])
-
-    val trainer = LearnWordsTrainer(MIN_CORRECT_ANSWERS, WORDS_PER_SESSION)
+    val trainers = HashMap<Long, LearnWordsTrainer>()
 
     while (true) {
         val responseString = service.getUpdates(lastUpdateId)
         println(responseString)
 
         val response: Response = json.decodeFromString(responseString)
-        val updates = response.result
-        val firstUpdate = updates.firstOrNull() ?: continue
-        val updateId = firstUpdate.updateId
+        if (response.result.isEmpty()) continue
 
-        lastUpdateId = updateId + 1
+        val sortedUpdates = response.result.sortedBy { it.updateId }
+        sortedUpdates.forEach { handleUpdate(json, it, trainers, service) }
 
-        val chatId = firstUpdate.message?.chat?.id ?: firstUpdate.callbackQuery?.message?.chat?.id
+        lastUpdateId = sortedUpdates.last().updateId + 1
 
-        if (chatId == null) continue
+        Thread.sleep(2000)
+    }
+}
 
-        val messageText = firstUpdate.message?.text ?: ""
+fun handleUpdate(
+    json: Json,
+    update: Update,
+    trainers: HashMap<Long, LearnWordsTrainer>,
+    service: TelegramBotService
+) {
+    val chatId = update.message?.chat?.id ?: update.callbackQuery?.message?.chat?.id ?: return
+    val messageText = update.message?.text ?: ""
+    val callbackData = update.callbackQuery?.data ?: ""
 
-        val callbackData = firstUpdate.callbackQuery?.data ?: ""
+    val trainer = trainers.getOrPut(chatId) { LearnWordsTrainer(fileName = "$chatId.txt") }
 
-        when {
-            callbackData.isNotEmpty() -> {
-                when {
-                    callbackData == CALLBACK_DATA_LEARN_WORDS -> {
-                        checkNextQuestionAndSend(json, trainer, service, chatId)
-                    }
-                    callbackData == CALLBACK_DATA_STATISTICS -> {
-                        sendStatistics(json, trainer, service, chatId)
-                    }
-                    callbackData == CALLBACK_DATA_MAIN_MENU -> {
-                        service.sendMenu(json, chatId)
-                    }
-                    callbackData.startsWith(CALLBACK_DATA_ANSWER_PREFIX) -> {
-                        checkAnswerAndSendNextStep(json, trainer, service, chatId, callbackData)
-                    }
+    when {
+        callbackData.isNotEmpty() -> {
+            when {
+                callbackData == CALLBACK_DATA_LEARN_WORDS -> {
+                    checkNextQuestionAndSend(json, trainer, service, chatId)
                 }
-            }
-            messageText.isNotEmpty() -> {
-                when (messageText) {
-                    "/start" -> service.sendMenu(json, chatId)
-                    else -> service.sendMessage(json, chatId, "Вы написали: $messageText")
+                callbackData == CALLBACK_DATA_STATISTICS -> {
+                    sendStatistics(json, trainer, service, chatId)
+                }
+                callbackData == CALLBACK_DATA_RESET -> {
+                    trainer.resetProgress()
+                    service.sendMessage(json, chatId, "Прогресс сброшен")
+                }
+                callbackData == CALLBACK_DATA_MAIN_MENU -> {
+                    service.sendMenu(json, chatId)
+                }
+                callbackData.startsWith(CALLBACK_DATA_ANSWER_PREFIX) -> {
+                    checkAnswerAndSendNextStep(json, trainer, service, chatId, callbackData)
                 }
             }
         }
-
-        Thread.sleep(2000)
+        messageText.isNotEmpty() -> {
+            when (messageText) {
+                "/start" -> service.sendMenu(json, chatId)
+                else -> service.sendMessage(json, chatId, "Вы написали: $messageText")
+            }
+        }
     }
 }
 
