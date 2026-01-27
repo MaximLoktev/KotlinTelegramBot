@@ -1,5 +1,6 @@
 package org.example
 
+import kotlinx.serialization.json.Json
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -15,72 +16,7 @@ class TelegramBotService(private val botToken: String) {
 
     private val client = HttpClient.newBuilder().build()
 
-    fun sendMenu(chatId: Int) {
-        val menuBody = """
-            {
-                "inline_keyboard": [
-                    [
-                        { 
-                            "text": "Изучить слова", 
-                            "callback_data": "$CALLBACK_DATA_LEARN_WORDS" 
-                        },
-                        { 
-                            "text": "Статистика", 
-                            "callback_data": "$CALLBACK_DATA_STATISTICS"
-                        }
-                    ]
-                ]
-            }
-        """.trimIndent()
-
-        sendMessage(chatId, text = "Основное меню", menuBody)
-    }
-
-    fun sendQuestion(chatId: Int, question: Question) {
-        val buttons = question.variants.mapIndexed { index, word ->
-            """
-            {
-                "text": "${word.translate}",
-                "callback_data": "$CALLBACK_DATA_ANSWER_PREFIX$index"
-            }
-            """.trimIndent()
-        }.joinToString(",")
-
-        val replyMarkup = """
-            {
-                "inline_keyboard": [
-                    [ $buttons ],
-                    [
-                        {
-                            "text": "🏠Меню",
-                            "callback_data": "$CALLBACK_DATA_MAIN_MENU"
-                        }
-                    ]
-                ]
-            }
-        """.trimIndent()
-
-        sendMessage(chatId, question.correctAnswer.text, replyMarkup)
-    }
-
-    fun sendMessage(chatId: Int, text: String, replyMarkup: String? = null) {
-        if (text.isEmpty() || text.length > 4096) return
-
-        val sendMessageUrl = "$TELEGRAM_BASE_URL/bot$botToken/sendMessage"
-
-        val replyMarkupPart = if (replyMarkup != null) ",\"reply_markup\": $replyMarkup" else ""
-        val requestBody = """{"chat_id":$chatId,"text":"$text"$replyMarkupPart}"""
-
-        val request = HttpRequest.newBuilder()
-            .uri(URI.create(sendMessageUrl))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-            .build()
-
-        client.send(request, HttpResponse.BodyHandlers.ofString())
-    }
-
-    fun getUpdates(updateId: Int): String {
+    fun getUpdates(updateId: Long): String {
         val urlGetUpdates = "$TELEGRAM_BASE_URL/bot$botToken/getUpdates?offset=$updateId"
 
         val request = HttpRequest.newBuilder()
@@ -92,67 +28,113 @@ class TelegramBotService(private val botToken: String) {
         return response.body()
     }
 
-    fun extractUpdateValue(updates: String, key: String): String {
-        val stringRegex = """"$key"\s*:\s*"([^"]+)"""".toRegex()
-        stringRegex.find(updates)?.let { return it.groupValues[1] }
+    fun sendMenu(json: Json, chatId: Long) {
+        val requestBody = SendMessageRequest(
+            chatId,
+            text = "Основное меню",
+            replyMarkup = ReplyMarkup(
+                listOf(listOf(
+                    InlineKeyboard("Изучить слова", CALLBACK_DATA_LEARN_WORDS),
+                    InlineKeyboard("Статистика", CALLBACK_DATA_STATISTICS),
+                ))
+            )
+        )
 
-        val numberRegex = """"$key"\s*:\s*(\d+)""".toRegex()
-        numberRegex.find(updates)?.let { return it.groupValues[1] }
-
-        return ""
+        val requestBodyString = json.encodeToString(requestBody)
+        baseSendMessage(requestBodyString)
     }
 
-    fun extractChatId(updates: String): String {
-        val chatRegex = """"chat"\s*:\s*\{[^}]*?"id"\s*:\s*(\d+)""".toRegex()
+    fun sendQuestion(json: Json, chatId: Long, question: Question) {
+        val requestBody = SendMessageRequest(
+            chatId,
+            text = question.correctAnswer.text,
+            replyMarkup = ReplyMarkup(
+                listOf(
+                    question.variants.mapIndexed { index, word ->
+                        InlineKeyboard(word.translate, "$CALLBACK_DATA_ANSWER_PREFIX$index")
+                    },
+                    listOf(InlineKeyboard("🏠Меню", CALLBACK_DATA_MAIN_MENU)),
+                )
+            )
+        )
 
-        return chatRegex.find(updates)?.groupValues[1] ?: ""
+        val requestBodyString = json.encodeToString(requestBody)
+        baseSendMessage(requestBodyString)
+    }
+
+    fun sendMessage(json: Json, chatId: Long, text: String) {
+        if (text.isEmpty() || text.length > 4096) return
+
+        val requestBody = SendMessageRequest(chatId, text)
+        val requestBodyString = json.encodeToString(requestBody)
+
+        baseSendMessage(requestBodyString)
+    }
+
+    private fun baseSendMessage(requestBodyString: String) {
+        val sendMessageUrl = "$TELEGRAM_BASE_URL/bot$botToken/sendMessage"
+
+        val request = HttpRequest.newBuilder()
+            .uri(URI.create(sendMessageUrl))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(requestBodyString))
+            .build()
+
+        client.send(request, HttpResponse.BodyHandlers.ofString())
     }
 }
 
 fun main(args: Array<String>) {
-    var updateId = 0
+    var lastUpdateId = 0L
+
+    val json = Json {
+        ignoreUnknownKeys = true
+    }
 
     val service = TelegramBotService(botToken = args[0])
 
     val trainer = LearnWordsTrainer(MIN_CORRECT_ANSWERS, WORDS_PER_SESSION)
 
     while (true) {
-        val updates = service.getUpdates(updateId)
-        println(updates)
+        val responseString = service.getUpdates(lastUpdateId)
+        println(responseString)
 
-        val updateIdString = service.extractUpdateValue(updates, "update_id")
+        val response: Response = json.decodeFromString(responseString)
+        val updates = response.result
+        val firstUpdate = updates.firstOrNull() ?: continue
+        val updateId = firstUpdate.updateId
 
-        if (updateIdString.isEmpty()) continue
+        lastUpdateId = updateId + 1
 
-        updateId = updateIdString.toInt() + 1
+        val chatId = firstUpdate.message?.chat?.id ?: firstUpdate.callbackQuery?.message?.chat?.id
 
-        val chatId = service.extractChatId(updates).toIntOrNull() ?: continue
+        if (chatId == null) continue
 
-        val messageText = service.extractUpdateValue(updates, "text")
+        val messageText = firstUpdate.message?.text ?: ""
 
-        val callbackData = service.extractUpdateValue(updates, "data")
+        val callbackData = firstUpdate.callbackQuery?.data ?: ""
 
         when {
             callbackData.isNotEmpty() -> {
                 when {
                     callbackData == CALLBACK_DATA_LEARN_WORDS -> {
-                        checkNextQuestionAndSend(trainer, service, chatId)
+                        checkNextQuestionAndSend(json, trainer, service, chatId)
                     }
                     callbackData == CALLBACK_DATA_STATISTICS -> {
-                        sendStatistics(trainer, service, chatId)
+                        sendStatistics(json, trainer, service, chatId)
                     }
                     callbackData == CALLBACK_DATA_MAIN_MENU -> {
-                        service.sendMenu(chatId)
+                        service.sendMenu(json, chatId)
                     }
                     callbackData.startsWith(CALLBACK_DATA_ANSWER_PREFIX) -> {
-                        checkAnswerAndSendNextStep(trainer, service,chatId, callbackData)
+                        checkAnswerAndSendNextStep(json, trainer, service, chatId, callbackData)
                     }
                 }
             }
             messageText.isNotEmpty() -> {
                 when (messageText) {
-                    "/start" -> service.sendMenu(chatId)
-                    else -> service.sendMessage(chatId, "Вы написали: $messageText")
+                    "/start" -> service.sendMenu(json, chatId)
+                    else -> service.sendMessage(json, chatId, "Вы написали: $messageText")
                 }
             }
         }
@@ -162,23 +144,25 @@ fun main(args: Array<String>) {
 }
 
 fun checkNextQuestionAndSend(
+    json: Json,
     trainer: LearnWordsTrainer,
     service: TelegramBotService,
-    chatId: Int
+    chatId: Long
 ) {
     val question = trainer.getNextQuestion()
 
     if (question != null) {
-        service.sendQuestion(chatId, question)
+        service.sendQuestion(json, chatId, question)
     } else {
-        service.sendMessage(chatId, "Вы выучили все слова в базе")
+        service.sendMessage(json, chatId, "Вы выучили все слова в базе")
     }
 }
 
 fun sendStatistics(
+    json: Json,
     trainer: LearnWordsTrainer,
     service: TelegramBotService,
-    chatId: Int
+    chatId: Long
 ) {
     val statistics = trainer.getStatistics()
 
@@ -187,13 +171,14 @@ fun sendStatistics(
     } else {
         "Словарь пуст"
     }
-    service.sendMessage(chatId, message)
+    service.sendMessage(json, chatId, message)
 }
 
 fun checkAnswerAndSendNextStep(
+    json: Json,
     trainer: LearnWordsTrainer,
     service: TelegramBotService,
-    chatId: Int,
+    chatId: Long,
     callbackData: String
 ) {
     val index = callbackData.substringAfter(CALLBACK_DATA_ANSWER_PREFIX).toIntOrNull()
@@ -204,16 +189,16 @@ fun checkAnswerAndSendNextStep(
         val isCorrect = trainer.checkAnswer(index)
 
         if (isCorrect) {
-            service.sendMessage(chatId, "Правильно!")
+            service.sendMessage(json, chatId, "Правильно!")
         } else {
             val word = currentQuestion.correctAnswer
 
-            service.sendMessage(chatId, "Неправильно! ${word.text} – это ${word.translate}")
+            service.sendMessage(json, chatId, "Неправильно! ${word.text} – это ${word.translate}")
         }
 
-        checkNextQuestionAndSend(trainer, service, chatId)
+        checkNextQuestionAndSend(json, trainer, service, chatId)
     } else {
-        service.sendMessage(chatId, "Произошла ошибка или сессия устарела!")
-        service.sendMenu(chatId)
+        service.sendMessage(json, chatId, "Произошла ошибка или сессия устарела!")
+        service.sendMenu(json, chatId)
     }
 }
