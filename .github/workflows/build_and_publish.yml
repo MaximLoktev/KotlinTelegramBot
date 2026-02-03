@@ -44,4 +44,4 @@ jobs:
           username:  ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            systemctl restart english-learning-bot
+            sudo systemctl restart english-learning-bot
