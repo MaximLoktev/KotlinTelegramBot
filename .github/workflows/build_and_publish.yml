@@ -24,7 +24,7 @@ jobs:
 
       - name: Rename file
         run: |
-          mv build/libs/EnglishWordsBot-1.0-SNAPSHOT-all.jar bot.jar
+          mv build/libs/KotlinTelegramBot.jar bot.jar
 
       - name: Deploy jar and words.txt to VPS
         uses: appleboy/scp-action@master
