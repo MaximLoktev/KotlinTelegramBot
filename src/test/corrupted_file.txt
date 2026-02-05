@@ -1,0 +1,4 @@
+valid|корректный|3
+invalid|битый|abc
+broken line
+also_valid|тоже_ок|0
