@@ -1,11 +1,34 @@
 package org.example
 
+/**
+ * Вспомогательное расширение для очистки строки.
+ * Оставляет буквы, цифры и одиночные пробелы внутри.
+ */
+private fun String.sanitize(): String {
+    return this.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ\\s]"), "")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+}
+
 fun Question.asConsoleString(): String {
-    val variants = variants
+    val sanitizedQuestion = correctAnswer.text.sanitize()
+
+    if (sanitizedQuestion.isBlank()) return ""
+
+    if (variants.isEmpty()) return ""
+
+    val validVariants = variants
+        .map { it.copy(translate = it.translate.sanitize()) }
+        .filter { it.translate.isNotBlank() }
+        .take(10)
+
+    if (validVariants.isEmpty()) return ""
+
+    val variantsBlock = validVariants
         .mapIndexed { index, word -> " ${index + 1} - ${word.translate}" }
         .joinToString("\n")
 
-    return "\n${correctAnswer.text}\n" + variants + "\n ----------\n 0 - Меню\n"
+    return "\n${sanitizedQuestion}\n" + variantsBlock + "\n ----------\n 0 - Меню\n"
 }
 
 fun main() {
