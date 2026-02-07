@@ -100,17 +100,35 @@ class LearnWordsTrainer(
         val lines = wordsFile.readLines()
 
         for (line in lines) {
+            if (line.trim().isEmpty()) continue
+
             val newLine = line.split("|")
 
             if (newLine.size < 3) {
-                println("Некорректная строка: $newLine")
+                println("Некорректная строка (недостаточно данных): $line")
+                continue
+            }
+
+            val text = newLine[0].trim()
+            val translate = newLine[1].trim()
+            val countStr = newLine[2].trim()
+
+            if (text.isEmpty() || translate.isEmpty()) {
+                println("Некорректная строка (пустое слово или перевод): $line")
+                continue
+            }
+
+            val correctAnswersCount = countStr.toIntOrNull()
+
+            if (correctAnswersCount == null) {
+                println("Некорректная строка (некорректное число ответов): $line")
                 continue
             }
 
             val model = Word(
-                text = newLine[0],
-                translate = newLine[1],
-                correctAnswersCount = newLine[2].toIntOrNull() ?: 0
+                text = text,
+                translate = translate,
+                correctAnswersCount = correctAnswersCount
             )
             dictionary.add(model)
         }

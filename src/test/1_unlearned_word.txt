@@ -1,0 +1,2 @@
+learned|изучен|3
+unlearned|неизучен|2
