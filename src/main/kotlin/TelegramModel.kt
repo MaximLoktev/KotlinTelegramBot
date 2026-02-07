@@ -92,11 +92,11 @@ data class GetFileResponse(
     @SerialName("ok")
     val ok: Boolean,
     @SerialName("result")
-    val result: TelegramFile? = null,
+    val result: FileInfo? = null,
 )
 
 @Serializable
-data class TelegramFile(
+data class FileInfo(
     @SerialName("file_id")
     val fileId: String,
     @SerialName("file_unique_id")

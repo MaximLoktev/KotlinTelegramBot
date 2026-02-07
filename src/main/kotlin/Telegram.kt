@@ -2,7 +2,6 @@ package org.example
 
 import kotlinx.serialization.json.Json
 import java.io.File
-import java.io.InputStream
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -17,23 +16,28 @@ const val CALLBACK_DATA_ANSWER_PREFIX = "answer_"
 
 class TelegramBotService(private val botToken: String) {
 
+    private val TELEGRAM_SAND_MESSAGE_URL = "$TELEGRAM_BASE_URL/bot$botToken/sendMessage"
+
     private val client = HttpClient.newBuilder().build()
 
-    fun getUpdates(updateId: Long): String {
-        val urlGetUpdates = "$TELEGRAM_BASE_URL/bot$botToken/getUpdates?offset=$updateId"
+    private val json = Json { ignoreUnknownKeys = true }
+
+    fun getUpdates(updateId: Long): List<Update> {
+        val url = "$TELEGRAM_BASE_URL/bot$botToken/getUpdates?offset=$updateId"
 
         val request = HttpRequest.newBuilder()
-            .uri(URI.create(urlGetUpdates))
+            .uri(URI.create(url))
             .build()
 
-        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-
-        return response.body()
+        return runCatching {
+            val response = client.send(request, HttpResponse.BodyHandlers.ofString()).body()
+            json.decodeFromString<Response>(response).result.sortedBy { it.updateId }
+        }.getOrDefault(emptyList())
     }
 
-    fun sendMenu(json: Json, chatId: Long) {
+    fun sendMenu(chatId: Long) {
         val requestBody = SendMessageRequest(
-            chatId,
+            chatId = chatId,
             text = "Основное меню",
             replyMarkup = ReplyMarkup(
                 listOf(
@@ -41,20 +45,20 @@ class TelegramBotService(private val botToken: String) {
                         InlineKeyboard("Изучить слова", CALLBACK_DATA_LEARN_WORDS),
                         InlineKeyboard("Статистика", CALLBACK_DATA_STATISTICS),
                     ),
-                    listOf(
-                        InlineKeyboard("Сбросить прогресс", CALLBACK_DATA_RESET),
-                    )
+                    listOf(InlineKeyboard("Сбросить прогресс", CALLBACK_DATA_RESET),)
                 )
             )
         )
 
-        val requestBodyString = json.encodeToString(requestBody)
-        baseSendMessage(requestBodyString)
+        sendPostRequest(
+            url = TELEGRAM_SAND_MESSAGE_URL,
+            body = json.encodeToString(requestBody)
+        )
     }
 
-    fun sendQuestion(json: Json, chatId: Long, question: Question) {
+    fun sendQuestion(chatId: Long, question: Question) {
         val requestBody = SendMessageRequest(
-            chatId,
+            chatId = chatId,
             text = question.correctAnswer.text,
             replyMarkup = ReplyMarkup(
                 listOf(
@@ -66,221 +70,76 @@ class TelegramBotService(private val botToken: String) {
             )
         )
 
-        val requestBodyString = json.encodeToString(requestBody)
-        baseSendMessage(requestBodyString)
+        sendPostRequest(
+            url = TELEGRAM_SAND_MESSAGE_URL,
+            body = json.encodeToString(requestBody)
+        )
     }
 
-    fun sendMessage(json: Json, chatId: Long, text: String) {
+    fun sendMessage(chatId: Long, text: String) {
         if (text.isEmpty() || text.length > 4096) return
 
         val requestBody = SendMessageRequest(chatId, text)
-        val requestBodyString = json.encodeToString(requestBody)
 
-        baseSendMessage(requestBodyString)
+        sendPostRequest(
+            url = TELEGRAM_SAND_MESSAGE_URL,
+            body = json.encodeToString(requestBody)
+        )
     }
 
-    fun getFile(fileId: String, json: Json): String {
-        val urlGetFile = "$TELEGRAM_BASE_URL/bot$botToken/getFile"
-
+    fun getFileInfo(fileId: String): FileInfo? {
         val requestBody = GetFileRequest(fileId = fileId)
-        val requestBodyString = json.encodeToString(requestBody)
 
-        val request = HttpRequest.newBuilder()
-            .uri(URI.create(urlGetFile))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(requestBodyString))
-            .build()
+        val response = sendPostRequest(
+            url = "$TELEGRAM_BASE_URL/bot$botToken/getFile",
+            body = json.encodeToString(requestBody))
 
-        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-
-        return response.body()
+        return response?.let { json.decodeFromString<GetFileResponse>(it).result }
     }
 
-    fun downloadFile(filePath: String, fileName: String) {
-        val urlGetFile = "$TELEGRAM_BASE_URL/file/bot$botToken/$filePath"
+    fun downloadFile(filePath: String, destinationFile: File) {
+        val url = "$TELEGRAM_BASE_URL/file/bot$botToken/$filePath"
 
-        val request = HttpRequest.newBuilder()
-            .uri(URI.create(urlGetFile))
-            .GET()
-            .build()
+        val request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build()
 
-        val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
-        println("status code: " + response.statusCode())
+        runCatching {
+            val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
 
-        val body: InputStream = response.body()
-        body.copyTo(File(fileName).outputStream(), 16 * 1024)
+            response.body().use { input ->
+                destinationFile.outputStream().use { output -> input.copyTo(output) }
+            }
+        }
     }
 
-    private fun baseSendMessage(requestBodyString: String) {
-        val sendMessageUrl = "$TELEGRAM_BASE_URL/bot$botToken/sendMessage"
-
-        val request = HttpRequest.newBuilder()
-            .uri(URI.create(sendMessageUrl))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(requestBodyString))
-            .build()
-
-        client.send(request, HttpResponse.BodyHandlers.ofString())
+    private fun sendPostRequest(url: String, body: String): String? {
+        return runCatching {
+            val request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build()
+            client.send(request, HttpResponse.BodyHandlers.ofString()).body()
+        }.getOrNull()
     }
 }
 
 fun main(args: Array<String>) {
-    var lastUpdateId = 0L
-    val json = Json { ignoreUnknownKeys = true }
+    val botToken = args.getOrNull(0) ?: throw IllegalArgumentException("Укажите токен бота")
 
-    val service = TelegramBotService(botToken = args[0])
-    val trainers = HashMap<Long, LearnWordsTrainer>()
+    val service = TelegramBotService(botToken)
+    val updateHandler = TelegramUpdateHandler(service)
+
+    var lastUpdateId = 0L
+
+    println("Бот запущен...")
 
     while (true) {
-        val responseString = service.getUpdates(lastUpdateId)
-        println(responseString)
+        val updates = service.getUpdates(lastUpdateId)
+        updates.forEach { updateHandler.handleUpdate(it) }
 
-        val response: Response = json.decodeFromString(responseString)
-        if (response.result.isEmpty()) continue
-
-        val sortedUpdates = response.result.sortedBy { it.updateId }
-        sortedUpdates.forEach { handleUpdate(json, it, trainers, service) }
-
-        lastUpdateId = sortedUpdates.last().updateId + 1
-
+        if (updates.isNotEmpty()) {
+            lastUpdateId = updates.last().updateId + 1
+        }
         Thread.sleep(2000)
     }
-}
-
-fun handleUpdate(
-    json: Json,
-    update: Update,
-    trainers: HashMap<Long, LearnWordsTrainer>,
-    service: TelegramBotService
-) {
-    val chatId = update.message?.chat?.id ?: update.callbackQuery?.message?.chat?.id ?: return
-    val messageText = update.message?.text ?: ""
-    val callbackData = update.callbackQuery?.data ?: ""
-    val document = update.message?.document
-
-    val trainer = trainers.getOrPut(chatId) { LearnWordsTrainer(fileName = "$chatId.txt") }
-
-    when {
-        callbackData.isNotEmpty() -> {
-            when {
-                callbackData == CALLBACK_DATA_LEARN_WORDS -> {
-                    checkNextQuestionAndSend(json, trainer, service, chatId)
-                }
-                callbackData == CALLBACK_DATA_STATISTICS -> {
-                    sendStatistics(json, trainer, service, chatId)
-                }
-                callbackData == CALLBACK_DATA_RESET -> {
-                    trainer.resetProgress()
-                    service.sendMessage(json, chatId, "Прогресс сброшен")
-                }
-                callbackData == CALLBACK_DATA_MAIN_MENU -> {
-                    service.sendMenu(json, chatId)
-                }
-                callbackData.startsWith(CALLBACK_DATA_ANSWER_PREFIX) -> {
-                    checkAnswerAndSendNextStep(json, trainer, service, chatId, callbackData)
-                }
-            }
-        }
-        messageText.isNotEmpty() -> {
-            when (messageText) {
-                "/start" -> service.sendMenu(json, chatId)
-                else -> service.sendMessage(json, chatId, "Вы написали: $messageText")
-            }
-        }
-        document != null -> {
-            downloadAndImportWords(json, service, trainer, chatId, document.fileId)
-        }
-    }
-}
-
-fun checkNextQuestionAndSend(
-    json: Json,
-    trainer: LearnWordsTrainer,
-    service: TelegramBotService,
-    chatId: Long
-) {
-    val question = trainer.getNextQuestion()
-
-    if (question != null) {
-        service.sendQuestion(json, chatId, question)
-    } else {
-        service.sendMessage(json, chatId, "Вы выучили все слова в базе")
-    }
-}
-
-fun sendStatistics(
-    json: Json,
-    trainer: LearnWordsTrainer,
-    service: TelegramBotService,
-    chatId: Long
-) {
-    val statistics = trainer.getStatistics()
-
-    val message = if (statistics != null) {
-        "Выучено ${statistics.learnedCount} из ${statistics.totalCount} слов | ${statistics.percent}%"
-    } else {
-        "Словарь пуст"
-    }
-    service.sendMessage(json, chatId, message)
-}
-
-fun checkAnswerAndSendNextStep(
-    json: Json,
-    trainer: LearnWordsTrainer,
-    service: TelegramBotService,
-    chatId: Long,
-    callbackData: String
-) {
-    val index = callbackData.substringAfter(CALLBACK_DATA_ANSWER_PREFIX).toIntOrNull()
-
-    val currentQuestion = trainer.question
-
-    if (index != null && currentQuestion != null) {
-        val isCorrect = trainer.checkAnswer(index)
-
-        if (isCorrect) {
-            service.sendMessage(json, chatId, "Правильно!")
-        } else {
-            val word = currentQuestion.correctAnswer
-
-            service.sendMessage(json, chatId, "Неправильно! ${word.text} – это ${word.translate}")
-        }
-
-        checkNextQuestionAndSend(json, trainer, service, chatId)
-    } else {
-        service.sendMessage(json, chatId, "Произошла ошибка или сессия устарела!")
-        service.sendMenu(json, chatId)
-    }
-}
-
-fun downloadAndImportWords(
-    json: Json,
-    service: TelegramBotService,
-    trainer: LearnWordsTrainer,
-    chatId: Long,
-    fileId: String
-) {
-    val jsonResponse = service.getFile(fileId, json)
-    val response: GetFileResponse = json.decodeFromString(jsonResponse)
-
-    response.result?.let { file ->
-        val fileName = file.fileUniqueId
-        val downloadedFile = File(fileName)
-
-        val message = try {
-            service.downloadFile(file.filePath, fileName)
-            trainer.addWordsFromFile(downloadedFile)
-            "Файл успешно обработан! Новые слова добавлены в ваш словарь."
-        } catch (e: Exception) {
-            "Произошла ошибка при обработке файла: ${e.message}"
-        } finally {
-            if (downloadedFile.exists()) {
-                val deleted = downloadedFile.delete()
-                if (!deleted) println("Предупреждение: не удалось удалить файл $fileName")
-            }
-        }
-
-        service.sendMessage(json, chatId, message)
-
-    } ?: service.sendMessage(json, chatId, "Не удалось получить информацию о файле от Telegram.")
 }
