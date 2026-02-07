@@ -31,7 +31,7 @@ class LearnWordsTrainer(
     var question: Question? = null
         private set
 
-    private val dictionary = loadDictionary()
+    private val dictionary = loadDictionary().toMutableList()
 
     fun getStatistics(): Statistics? {
         val totalCount = dictionary.size
@@ -88,52 +88,56 @@ class LearnWordsTrainer(
         saveDictionary()
     }
 
-    private fun loadDictionary(): List<Word> {
-        val dictionary = mutableListOf<Word>()
+    /**
+     * Метод для добавления слов из внешнего файла
+     */
+    fun addWordsFromFile(file: File) {
+        val newWords = parseFile(file)
 
+        val existingTexts = dictionary.map { it.text.lowercase() }.toSet()
+
+        val uniqueNewWords = newWords.filter {
+            it.text.lowercase() !in existingTexts
+        }
+
+        dictionary.addAll(uniqueNewWords)
+        saveDictionary()
+    }
+
+    private fun loadDictionary(): List<Word> {
         val wordsFile = File(fileName)
 
         if (!wordsFile.exists()) {
             File(PATH_NAME).copyTo(wordsFile)
         }
 
-        val lines = wordsFile.readLines()
+        return parseFile(wordsFile)
+    }
 
-        for (line in lines) {
-            if (line.trim().isEmpty()) continue
+    /**
+     * Метод для парсинга файла
+     */
+    private fun parseFile(file: File): List<Word> {
+        val words = mutableListOf<Word>()
 
-            val newLine = line.split("|")
+        if (!file.exists()) return words
 
-            if (newLine.size < 3) {
-                println("Некорректная строка (недостаточно данных): $line")
-                continue
+        file.readLines().forEach { line ->
+            if (line.trim().isEmpty()) return@forEach
+
+            val parts = line.split("|")
+
+            if (parts.size < 2) return@forEach
+
+            val text = parts[0].trim()
+            val translate = parts[1].trim()
+            val count = parts.getOrNull(2)?.trim()?.toIntOrNull() ?: 0
+
+            if (text.isNotEmpty() && translate.isNotEmpty()) {
+                words.add(Word(text, translate, count))
             }
-
-            val text = newLine[0].trim()
-            val translate = newLine[1].trim()
-            val countStr = newLine[2].trim()
-
-            if (text.isEmpty() || translate.isEmpty()) {
-                println("Некорректная строка (пустое слово или перевод): $line")
-                continue
-            }
-
-            val correctAnswersCount = countStr.toIntOrNull()
-
-            if (correctAnswersCount == null) {
-                println("Некорректная строка (некорректное число ответов): $line")
-                continue
-            }
-
-            val model = Word(
-                text = text,
-                translate = translate,
-                correctAnswersCount = correctAnswersCount
-            )
-            dictionary.add(model)
         }
-
-        return dictionary
+        return words
     }
 
     private fun saveDictionary() {

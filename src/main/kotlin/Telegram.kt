@@ -1,6 +1,8 @@
 package org.example
 
 import kotlinx.serialization.json.Json
+import java.io.File
+import java.io.InputStream
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -77,6 +79,38 @@ class TelegramBotService(private val botToken: String) {
         baseSendMessage(requestBodyString)
     }
 
+    fun getFile(fileId: String, json: Json): String {
+        val urlGetFile = "$TELEGRAM_BASE_URL/bot$botToken/getFile"
+
+        val requestBody = GetFileRequest(fileId = fileId)
+        val requestBodyString = json.encodeToString(requestBody)
+
+        val request = HttpRequest.newBuilder()
+            .uri(URI.create(urlGetFile))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(requestBodyString))
+            .build()
+
+        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+
+        return response.body()
+    }
+
+    fun downloadFile(filePath: String, fileName: String) {
+        val urlGetFile = "$TELEGRAM_BASE_URL/file/bot$botToken/$filePath"
+
+        val request = HttpRequest.newBuilder()
+            .uri(URI.create(urlGetFile))
+            .GET()
+            .build()
+
+        val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
+        println("status code: " + response.statusCode())
+
+        val body: InputStream = response.body()
+        body.copyTo(File(fileName).outputStream(), 16 * 1024)
+    }
+
     private fun baseSendMessage(requestBodyString: String) {
         val sendMessageUrl = "$TELEGRAM_BASE_URL/bot$botToken/sendMessage"
 
@@ -122,6 +156,7 @@ fun handleUpdate(
     val chatId = update.message?.chat?.id ?: update.callbackQuery?.message?.chat?.id ?: return
     val messageText = update.message?.text ?: ""
     val callbackData = update.callbackQuery?.data ?: ""
+    val document = update.message?.document
 
     val trainer = trainers.getOrPut(chatId) { LearnWordsTrainer(fileName = "$chatId.txt") }
 
@@ -151,6 +186,9 @@ fun handleUpdate(
                 "/start" -> service.sendMenu(json, chatId)
                 else -> service.sendMessage(json, chatId, "Вы написали: $messageText")
             }
+        }
+        document != null -> {
+            downloadAndImportWords(json, service, trainer, chatId, document.fileId)
         }
     }
 }
@@ -213,4 +251,36 @@ fun checkAnswerAndSendNextStep(
         service.sendMessage(json, chatId, "Произошла ошибка или сессия устарела!")
         service.sendMenu(json, chatId)
     }
+}
+
+fun downloadAndImportWords(
+    json: Json,
+    service: TelegramBotService,
+    trainer: LearnWordsTrainer,
+    chatId: Long,
+    fileId: String
+) {
+    val jsonResponse = service.getFile(fileId, json)
+    val response: GetFileResponse = json.decodeFromString(jsonResponse)
+
+    response.result?.let { file ->
+        val fileName = file.fileUniqueId
+        val downloadedFile = File(fileName)
+
+        val message = try {
+            service.downloadFile(file.filePath, fileName)
+            trainer.addWordsFromFile(downloadedFile)
+            "Файл успешно обработан! Новые слова добавлены в ваш словарь."
+        } catch (e: Exception) {
+            "Произошла ошибка при обработке файла: ${e.message}"
+        } finally {
+            if (downloadedFile.exists()) {
+                val deleted = downloadedFile.delete()
+                if (!deleted) println("Предупреждение: не удалось удалить файл $fileName")
+            }
+        }
+
+        service.sendMessage(json, chatId, message)
+
+    } ?: service.sendMessage(json, chatId, "Не удалось получить информацию о файле от Telegram.")
 }
