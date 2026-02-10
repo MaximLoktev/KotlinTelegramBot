@@ -116,48 +116,43 @@ class TelegramBotService(private val botToken: String) {
         }
     }
 
-    fun sendPhoto(chatId: Long, photo: Any, hasSpoiler: Boolean = false): Photo? {
-        val url = "$TELEGRAM_BASE_URL/bot$botToken/sendPhoto"
+    fun sendPhoto(chatId: Long, photo: File, hasSpoiler: Boolean = false): Photo? =
+        executePhotoRequest { url ->
+            val boundary = BigInteger(35, Random()).toString()
 
-        val request = when (photo) {
-            is File -> buildMultipartRequest(url, chatId, photo, hasSpoiler)
-            is String -> buildJsonRequest(url, chatId, photo, hasSpoiler)
-            else -> null
+            val data = mapOf(
+                "chat_id" to chatId.toString(),
+                "photo" to photo,
+                "has_spoiler" to hasSpoiler.toString()
+            )
+            HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .postMultipartFormData(boundary, data)
+                .build()
         }
 
-        if (request == null) return null
+    fun sendPhoto(chatId: Long, photoId: String, hasSpoiler: Boolean = false): Photo? =
+        executePhotoRequest { url ->
+            val body = json.encodeToString(PhotoRequest(chatId, photoId, hasSpoiler))
 
-        val response = client.send(request, HttpResponse.BodyHandlers.ofString()).body()
-        println(response)
+            HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build()
+        }
 
-        return response.let { json.decodeFromString<PhotoResponse>(it).result?.photo?.last() }
-    }
+    private fun executePhotoRequest(requestBuilder: (String) -> HttpRequest): Photo? {
+        val url = "$TELEGRAM_BASE_URL/bot$botToken/sendPhoto"
 
-    private fun buildMultipartRequest(url: String, chatId: Long, file: File, hasSpoiler: Boolean): HttpRequest {
-        val boundary = BigInteger(35, Random()).toString()
+        return runCatching {
+            val request = requestBuilder(url)
+            val response = client.send(request, HttpResponse.BodyHandlers.ofString()).body()
 
-        val data = mapOf(
-            "chat_id" to chatId.toString(),
-            "photo" to file,
-            "has_spoiler" to hasSpoiler.toString()
-        )
-        return HttpRequest.newBuilder()
-            .uri(URI.create(url))
-            .postMultipartFormData(boundary, data)
-            .build()
-    }
-
-    private fun buildJsonRequest(url: String, chatId: Long, photoId: String, hasSpoiler: Boolean): HttpRequest {
-        val body = json.encodeToString(mapOf(
-            "chat_id" to chatId.toString(),
-            "photo" to photoId,
-            "has_spoiler" to hasSpoiler.toString()
-        ))
-        return HttpRequest.newBuilder()
-            .uri(URI.create(url))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(body))
-            .build()
+            json.decodeFromString<PhotoResponse>(response).result?.photo?.last()
+        }.onFailure {
+            println("Ошибка при отправке фото: ${it.message}")
+        }.getOrNull()
     }
 
     private fun sendPostRequest(url: String, body: String): String? {
@@ -233,39 +228,3 @@ private fun HttpRequest.Builder.postMultipartFormData(
 
     return this
 }
-
-//private fun HttpRequest.Builder.postMultipartFormData(
-//    boundary: String,
-//    data: Map<String, Any>
-//): HttpRequest.Builder {
-//    val charset = StandardCharsets.UTF_8
-//
-//    val byteArrays = ArrayList<ByteArray>()
-//
-//    val separator = "--$boundary\r\nContent-Disposition: form-data; name=".toByteArray(charset)
-//
-//    for (entry in data.entries) {
-//        byteArrays.add(separator)
-//
-//        when (entry.value) {
-//            is File -> {
-//                val file = entry.value as File
-//                val path = Path.of(file.toURI())
-//                val mimeType = Files.probeContentType(path)
-//
-//                byteArrays.add(
-//                    "\'${entry.key}\'; filename=\'${path.fileName}\'\r\nContent-Type: $mimeType\r\n\r\n".toByteArray(charset)
-//                )
-//                byteArrays.add(Files.readAllBytes(path))
-//                byteArrays.add("\r\n".toByteArray(charset))
-//            }
-//            else -> byteArrays.add("\'${entry.key}\'\r\n\r\n${entry.value}\r\n".toByteArray(charset))
-//        }
-//    }
-//    byteArrays.add("--$boundary--".toByteArray(charset))
-//
-//    this.header("Content-Type", "multipart/form-data;boundary=$boundary")
-//        .POST(HttpRequest.BodyPublishers.ofByteArrays(byteArrays))
-//
-//    return this
-//}

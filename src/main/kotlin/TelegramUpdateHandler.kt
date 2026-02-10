@@ -54,20 +54,21 @@ class TelegramUpdateHandler(private val service: TelegramBotService) {
     }
 
     fun sendPhotoAndUpdateFileId(trainer: LearnWordsTrainer, chatId: Long, word: Word) {
-        val photoSource: Any = when {
-            !word.fileId.isNullOrBlank() -> word.fileId!!
+        val photoResult = when {
+            !word.fileId.isNullOrBlank() -> {
+                service.sendPhoto(chatId, word.fileId!!, hasSpoiler = true)
+            }
             !word.imagePath.isNullOrBlank() -> {
                 val file = File(word.imagePath)
-                if (file.exists()) file else return
+
+                if (file.exists()) {
+                    service.sendPhoto(chatId, file, hasSpoiler = true)
+                } else {
+                    println("Файл по пути ${word.imagePath} не найден")
+                    null
+                }
             }
             else -> return
-        }
-
-        val photoResult = try {
-            service.sendPhoto(chatId, photoSource, hasSpoiler = true)
-        } catch (e: Exception) {
-            println("Ошибка при отправке фото: ${e.message}")
-            null
         }
 
         if (word.fileId.isNullOrBlank() && photoResult != null) {

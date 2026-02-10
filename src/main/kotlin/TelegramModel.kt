@@ -82,6 +82,16 @@ data class InlineKeyboard(
 )
 
 @Serializable
+data class PhotoRequest(
+    @SerialName("chat_id")
+    val chatId: Long,
+    @SerialName("photo")
+    val photoId: String,
+    @SerialName("has_spoiler")
+    val hasSpoiler: Boolean,
+)
+
+@Serializable
 data class PhotoResponse(
     @SerialName("ok")
     val ok: Boolean,
