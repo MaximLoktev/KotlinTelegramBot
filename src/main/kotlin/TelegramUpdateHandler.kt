@@ -43,8 +43,37 @@ class TelegramUpdateHandler(private val service: TelegramBotService) {
     private fun checkNextQuestionAndSend(trainer: LearnWordsTrainer, chatId: Long) {
         val question = trainer.getNextQuestion()
 
-        if (question != null) service.sendQuestion(chatId, question)
-        else service.sendMessage(chatId, "Вы выучили все слова в базе")
+        if (question == null) {
+            service.sendMessage(chatId, "Вы выучили все слова в базе!")
+            return
+        }
+
+        sendPhotoAndUpdateFileId(trainer, chatId, question.correctAnswer)
+
+        service.sendQuestion(chatId, question)
+    }
+
+    fun sendPhotoAndUpdateFileId(trainer: LearnWordsTrainer, chatId: Long, word: Word) {
+        val photoSource: Any = when {
+            !word.fileId.isNullOrBlank() -> word.fileId!!
+            !word.imagePath.isNullOrBlank() -> {
+                val file = File(word.imagePath)
+                if (file.exists()) file else return
+            }
+            else -> return
+        }
+
+        val photoResult = try {
+            service.sendPhoto(chatId, photoSource, hasSpoiler = true)
+        } catch (e: Exception) {
+            println("Ошибка при отправке фото: ${e.message}")
+            null
+        }
+
+        if (word.fileId.isNullOrBlank() && photoResult != null) {
+            word.fileId = photoResult.fileId
+            trainer.saveDictionary()
+        }
     }
 
     private fun sendStatistics(trainer: LearnWordsTrainer, chatId: Long) {

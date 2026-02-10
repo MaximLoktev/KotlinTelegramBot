@@ -10,6 +10,8 @@ data class Word(
     val text: String,
     val translate: String,
     var correctAnswersCount: Int = 0,
+    val imagePath: String? = null,
+    var fileId: String? = null,
 )
 
 data class Statistics(
@@ -131,22 +133,22 @@ class LearnWordsTrainer(
 
             val text = parts[0].trim()
             val translate = parts[1].trim()
-            val count = parts.getOrNull(2)?.trim()?.toIntOrNull() ?: 0
+            val correctAnswersCount = parts.getOrNull(2)?.trim()?.toIntOrNull() ?: 0
+            val imagePath = parts.getOrNull(3)?.trim()?.takeIf { it.isNotBlank() }
+            val fileId = parts.getOrNull(4)?.trim()?.takeIf { it.isNotBlank() }
 
             if (text.isNotEmpty() && translate.isNotEmpty()) {
-                words.add(Word(text, translate, count))
+                words.add(Word(text, translate, correctAnswersCount, imagePath, fileId))
             }
         }
         return words
     }
 
-    private fun saveDictionary() {
-        val wordsFile = File(fileName)
-
+    fun saveDictionary() {
         val lines = dictionary.map { word ->
-            "${word.text}|${word.translate}|${word.correctAnswersCount}"
+            "${word.text}|${word.translate}|${word.correctAnswersCount}|${word.imagePath.orEmpty()}|${word.fileId.orEmpty()}"
         }
 
-        wordsFile.writeText(lines.joinToString("\n"))
+        File(fileName).writeText(lines.joinToString("\n"))
     }
 }
