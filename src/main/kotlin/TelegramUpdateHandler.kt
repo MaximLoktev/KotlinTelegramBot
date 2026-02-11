@@ -56,7 +56,9 @@ class TelegramUpdateHandler(private val service: TelegramBotService) {
     fun sendPhotoAndUpdateFileId(trainer: LearnWordsTrainer, chatId: Long, word: Word) {
         val photoResult = when {
             !word.fileId.isNullOrBlank() -> {
-                service.sendPhoto(chatId, word.fileId!!, hasSpoiler = true)
+                word.fileId?.let {
+                    service.sendPhoto(chatId, it, hasSpoiler = true)
+                }
             }
             !word.imagePath.isNullOrBlank() -> {
                 val file = File(word.imagePath)
