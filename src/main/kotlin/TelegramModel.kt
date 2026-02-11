@@ -82,6 +82,44 @@ data class InlineKeyboard(
 )
 
 @Serializable
+data class PhotoRequest(
+    @SerialName("chat_id")
+    val chatId: Long,
+    @SerialName("photo")
+    val photoId: String,
+    @SerialName("has_spoiler")
+    val hasSpoiler: Boolean,
+)
+
+@Serializable
+data class PhotoResponse(
+    @SerialName("ok")
+    val ok: Boolean,
+    @SerialName("result")
+    val result: Result? = null,
+)
+
+@Serializable
+data class Result(
+    @SerialName("photo")
+    val photo: List<Photo>,
+)
+
+@Serializable
+data class Photo(
+    @SerialName("file_id")
+    val fileId: String,
+    @SerialName("file_unique_id")
+    val fileUniqueId: String,
+    @SerialName("file_size")
+    val fileSize: Long,
+    @SerialName("width")
+    val width: Long,
+    @SerialName("height")
+    val height: Long,
+)
+
+@Serializable
 data class GetFileRequest(
     @SerialName("file_id")
     val fileId: String,

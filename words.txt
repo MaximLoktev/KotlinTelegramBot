@@ -1,4 +1,16 @@
-hello|привет|0
-dog|собака|0
-cat|кошка|0
-thank you|спасибо|0
+book|книга|0|images/book.jpg|
+water|вода|0|images/water.jpg|
+friend|друг|0|images/friend.jpg|
+house|дом|0|images/house.jpg|
+time|время|0|images/time.jpg|
+sun|солнце|0|images/sun.jpg|
+bread|хлеб|0|images/bread.jpg|
+city|город|0|images/city.jpg|
+money|деньги|0|images/money.jpg|
+work|работа|0|images/work.jpg|
+family|семья|0|images/family.jpg|
+tree|дерево|0|images/tree.jpg|
+car|машина|0|images/car.jpg|
+school|школа|0|images/school.jpg|
+music|музыка|0|images/music.jpg|
+window|окно|0|images/window.jpg|
