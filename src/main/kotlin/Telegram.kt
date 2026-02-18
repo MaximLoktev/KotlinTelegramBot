@@ -21,14 +21,16 @@ const val CALLBACK_DATA_ANSWER_PREFIX = "answer_"
 
 class TelegramBotService(private val botToken: String) {
 
-    private val TELEGRAM_SAND_MESSAGE_URL = "$TELEGRAM_BASE_URL/bot$botToken/sendMessage"
+    private val baseUrl = "$TELEGRAM_BASE_URL/bot$botToken"
 
     private val client = HttpClient.newBuilder().build()
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    // --- МЕТОД ПОЛУЧЕНИЯ ОБНОВЛЕНИЙ ---
+
     fun getUpdates(updateId: Long): List<Update> {
-        val url = "$TELEGRAM_BASE_URL/bot$botToken/getUpdates?offset=$updateId"
+        val url = "$baseUrl/getUpdates?offset=$updateId"
 
         val request = HttpRequest.newBuilder()
             .uri(URI.create(url))
@@ -40,81 +42,51 @@ class TelegramBotService(private val botToken: String) {
         }.getOrDefault(emptyList())
     }
 
-    fun sendMenu(chatId: Long) {
-        val requestBody = SendMessageRequest(
-            chatId = chatId,
-            text = "Основное меню",
-            replyMarkup = ReplyMarkup(
-                listOf(
-                    listOf(
-                        InlineKeyboard("Изучить слова", CALLBACK_DATA_LEARN_WORDS),
-                        InlineKeyboard("Статистика", CALLBACK_DATA_STATISTICS),
-                    ),
-                    listOf(InlineKeyboard("Сбросить прогресс", CALLBACK_DATA_RESET),)
-                )
-            )
-        )
+    // --- МЕТОДЫ ОТПРАВКИ ---
 
-        sendPostRequest(
-            url = TELEGRAM_SAND_MESSAGE_URL,
-            body = json.encodeToString(requestBody)
-        )
+    fun sendMessage(chatId: Long, text: String, replyMarkup: ReplyMarkup? = null): Long? {
+        return sendBaseMessage(chatId, text, replyMarkup)
     }
 
-    fun sendQuestion(chatId: Long, question: Question) {
-        val requestBody = SendMessageRequest(
-            chatId = chatId,
-            text = question.correctAnswer.text,
-            replyMarkup = ReplyMarkup(
-                listOf(
-                    question.variants.mapIndexed { index, word ->
-                        InlineKeyboard(word.translate, "$CALLBACK_DATA_ANSWER_PREFIX$index")
-                    },
-                    listOf(InlineKeyboard("🏠Меню", CALLBACK_DATA_MAIN_MENU)),
-                )
-            )
-        )
+    fun sendQuestion(chatId: Long, question: Question): Long? {
+        val text = "Как переводится слово: <b>${question.correctAnswer.text}</b>?"
 
-        sendPostRequest(
-            url = TELEGRAM_SAND_MESSAGE_URL,
-            body = json.encodeToString(requestBody)
-        )
-    }
-
-    fun sendMessage(chatId: Long, text: String) {
-        if (text.isEmpty() || text.length > 4096) return
-
-        val requestBody = SendMessageRequest(chatId, text)
-
-        sendPostRequest(
-            url = TELEGRAM_SAND_MESSAGE_URL,
-            body = json.encodeToString(requestBody)
-        )
-    }
-
-    fun getFileInfo(fileId: String): FileInfo? {
-        val requestBody = GetFileRequest(fileId = fileId)
-
-        val response = sendPostRequest(
-            url = "$TELEGRAM_BASE_URL/bot$botToken/getFile",
-            body = json.encodeToString(requestBody))
-
-        return response?.let { json.decodeFromString<GetFileResponse>(it).result }
-    }
-
-    fun downloadFile(filePath: String, destinationFile: File) {
-        val url = "$TELEGRAM_BASE_URL/file/bot$botToken/$filePath"
-
-        val request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build()
-
-        runCatching {
-            val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
-
-            response.body().use { input ->
-                destinationFile.outputStream().use { output -> input.copyTo(output) }
-            }
+        val optionsButtons = question.variants.mapIndexed { index, word ->
+            InlineKeyboard(word.translate, "$CALLBACK_DATA_ANSWER_PREFIX$index")
         }
+        val rows = optionsButtons.chunked(2).map { it }
+
+        val fullKeyboard = rows + listOf(listOf(InlineKeyboard("🏠 Меню", CALLBACK_DATA_MAIN_MENU)))
+        val keyboard = ReplyMarkup(fullKeyboard)
+
+        return sendBaseMessage(chatId, text, keyboard)
     }
+
+    // --- МЕТОДЫ РЕДАКТИРОВАНИЯ ---
+
+    fun editMessage(chatId: Long, messageId: Long, text: String, keyboard: ReplyMarkup? = null): String? {
+        val requestBody = EditMessageRequest(chatId, messageId, text, keyboard, parseMode = "HTML")
+
+        return sendPostRequest("$baseUrl/editMessageText", json.encodeToString(requestBody))
+    }
+
+    // --- КЛАВИАТУРЫ ---
+
+    fun getMainMenuKeyboard(): ReplyMarkup {
+        return ReplyMarkup(listOf(
+            listOf(InlineKeyboard("Учить слова", CALLBACK_DATA_LEARN_WORDS)),
+            listOf(InlineKeyboard("Статистика", CALLBACK_DATA_STATISTICS)),
+            listOf(InlineKeyboard("Сбросить прогресс", CALLBACK_DATA_RESET))
+        ))
+    }
+
+    fun getBackToMenuKeyboard(): ReplyMarkup {
+        return ReplyMarkup(listOf(
+            listOf(InlineKeyboard("⬅️ В главное меню", CALLBACK_DATA_MAIN_MENU))
+        ))
+    }
+
+    // --- МЕТОДЫ ОТПРАВКИ ФОТО ---
 
     fun sendPhoto(chatId: Long, photo: File, hasSpoiler: Boolean = false): Photo? =
         executePhotoRequest { url ->
@@ -142,17 +114,47 @@ class TelegramBotService(private val botToken: String) {
                 .build()
         }
 
-    private fun executePhotoRequest(requestBuilder: (String) -> HttpRequest): Photo? {
-        val url = "$TELEGRAM_BASE_URL/bot$botToken/sendPhoto"
+    // --- МЕТОДЫ РАБОТЫ С ФАЙЛАМИ ---
 
-        return runCatching {
-            val request = requestBuilder(url)
-            val response = client.send(request, HttpResponse.BodyHandlers.ofString()).body()
+    fun getFileInfo(fileId: String): FileInfo? {
+        val requestBody = GetFileRequest(fileId = fileId)
 
-            json.decodeFromString<PhotoResponse>(response).result?.photo?.last()
-        }.onFailure {
-            println("Ошибка при отправке фото: ${it.message}")
-        }.getOrNull()
+        val response = sendPostRequest("$baseUrl/getFile", json.encodeToString(requestBody))
+
+        return response?.let { json.decodeFromString<GetFileResponse>(it).result }
+    }
+
+    fun downloadFile(filePath: String, destinationFile: File) {
+        val url = "$TELEGRAM_BASE_URL/file/bot$botToken/$filePath"
+
+        val request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build()
+
+        runCatching {
+            val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
+
+            response.body().use { input ->
+                destinationFile.outputStream().use { output -> input.copyTo(output) }
+            }
+        }
+    }
+
+    // --- ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ---
+
+    private fun String?.parseMessageId(): Long? {
+        return try {
+            this?.let { json.decodeFromString<MessageResponse>(it).result?.messageId }
+        } catch (e: Exception) {
+            println("Ошибка парсинга ответа: ${e.message}")
+            null
+        }
+    }
+
+    private fun sendBaseMessage(chatId: Long, text: String, replyMarkup: ReplyMarkup? = null): Long? {
+        if (text.isEmpty() || text.length > 4096) return null
+
+        val requestBody = SendMessageRequest(chatId, text, replyMarkup, parseMode = "HTML")
+
+        return sendPostRequest("$baseUrl/sendMessage", json.encodeToString(requestBody)).parseMessageId()
     }
 
     private fun sendPostRequest(url: String, body: String): String? {
@@ -164,6 +166,17 @@ class TelegramBotService(private val botToken: String) {
                 .build()
 
             client.send(request, HttpResponse.BodyHandlers.ofString()).body()
+        }.getOrNull()
+    }
+
+    private fun executePhotoRequest(requestBuilder: (String) -> HttpRequest): Photo? {
+        return runCatching {
+            val request = requestBuilder("$baseUrl/sendPhoto")
+            val response = client.send(request, HttpResponse.BodyHandlers.ofString()).body()
+
+            json.decodeFromString<PhotoResponse>(response).result?.photo?.last()
+        }.onFailure {
+            println("Ошибка при отправке фото: ${it.message}")
         }.getOrNull()
     }
 }

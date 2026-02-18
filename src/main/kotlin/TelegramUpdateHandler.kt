@@ -2,7 +2,10 @@ package org.example
 
 import java.io.File
 
-class TelegramUpdateHandler(private val service: TelegramBotService) {
+class TelegramUpdateHandler(
+    private val service: TelegramBotService,
+    private val dynamicMessage: DynamicMessage = DynamicMessage(),
+) {
 
     private val trainers = HashMap<Long, LearnWordsTrainer>()
 
@@ -26,34 +29,117 @@ class TelegramUpdateHandler(private val service: TelegramBotService) {
         when {
             data == CALLBACK_DATA_LEARN_WORDS -> checkNextQuestionAndSend(trainer, chatId)
             data == CALLBACK_DATA_STATISTICS -> sendStatistics(trainer, chatId)
-            data == CALLBACK_DATA_RESET -> {
-                trainer.resetProgress()
-                service.sendMessage(chatId, "Прогресс сброшен")
-            }
-            data == CALLBACK_DATA_MAIN_MENU -> service.sendMenu(chatId)
+            data == CALLBACK_DATA_RESET -> resetProgressAndShowMenu(chatId, trainer)
+            data == CALLBACK_DATA_MAIN_MENU -> showMainMenu(chatId)
             data.startsWith(CALLBACK_DATA_ANSWER_PREFIX) -> checkAnswerAndSendNextStep(trainer, chatId, data)
         }
     }
 
     private fun handleMessage(chatId: Long, text: String) {
-        if (text == "/start") service.sendMenu(chatId)
-        else service.sendMessage(chatId, "Вы написали: $text")
+        if (text == "/start") {
+            showMainMenu(chatId)
+        } else {
+            service.sendMessage(chatId, "Вы написали: <i>$text</i>")
+        }
+    }
+
+    private fun showMainMenu(chatId: Long) {
+        val lastId = dynamicMessage.getId(chatId)
+        val menuText = "<b>Добро пожаловать в тренажер!</b>\n\nВыбери нужный раздел ниже:"
+        val menuKeyboard = service.getMainMenuKeyboard()
+
+        if (lastId != null) {
+            service.editMessage(chatId, lastId, menuText, menuKeyboard)
+        } else {
+            val newId = service.sendMessage(chatId, menuText, menuKeyboard)
+            newId?.let { dynamicMessage.saveId(chatId, it) }
+        }
+    }
+
+    private fun checkAnswerAndSendNextStep(trainer: LearnWordsTrainer, chatId: Long, data: String) {
+        val index = data.substringAfter(CALLBACK_DATA_ANSWER_PREFIX).toIntOrNull()
+        val currentQuestion = trainer.question
+        val lastId = dynamicMessage.getId(chatId)
+
+        if (index != null && currentQuestion != null && lastId != null) {
+            dynamicMessage.clearId(chatId)
+
+            val isCorrect = trainer.checkAnswer(index)
+            showAnswerStatus(chatId, lastId, currentQuestion.correctAnswer, isCorrect)
+
+            checkNextQuestionAndSend(trainer, chatId)
+        } else {
+            showMainMenu(chatId)
+        }
+    }
+
+    private fun showAnswerStatus(chatId: Long, messageId: Long, word: Word, isCorrect: Boolean) {
+        val icon = if (isCorrect) "✅" else "❌"
+        val text = """
+            <b>$icon ${if (isCorrect) "Правильно!" else "Ошибка"}</b>
+            Слово: <u>${word.text}</u> — это <b>${word.translate}</b>
+        """.trimIndent()
+
+        service.editMessage(chatId, messageId, text, null)
     }
 
     private fun checkNextQuestionAndSend(trainer: LearnWordsTrainer, chatId: Long) {
         val question = trainer.getNextQuestion()
 
         if (question == null) {
-            service.sendMessage(chatId, "Вы выучили все слова в базе!")
+            service.sendMessage(chatId, "⭐ <b>Поздравляем!</b> Вы выучили все слова.")
+            showMainMenu(chatId)
             return
         }
 
         sendPhotoAndUpdateFileId(trainer, chatId, question.correctAnswer)
 
-        service.sendQuestion(chatId, question)
+        val questionId = service.sendQuestion(chatId, question)
+        questionId?.let { dynamicMessage.saveId(chatId, it) }
     }
 
-    fun sendPhotoAndUpdateFileId(trainer: LearnWordsTrainer, chatId: Long, word: Word) {
+    private fun sendStatistics(trainer: LearnWordsTrainer, chatId: Long) {
+        val stats = trainer.getStatistics() ?: return
+
+        val doneSteps = stats.percent / 10
+        val progressBar = "🟩".repeat(doneSteps) + "⬜".repeat(10 - doneSteps)
+
+        val text = """
+            📊 <b>Твой прогресс:</b>
+            $progressBar ${stats.percent}%
+        
+            ✅ Выучено слов: <b>${stats.learnedCount}</b>
+            📚 Всего в базе: <b>${stats.totalCount}</b>
+        """.trimIndent()
+
+        val keyboard = service.getBackToMenuKeyboard()
+
+        val lastId = dynamicMessage.getId(chatId)
+
+        if (lastId != null) {
+            service.editMessage(chatId, lastId, text, keyboard)
+        } else {
+            val newId = service.sendMessage(chatId, text, keyboard)
+            newId?.let { dynamicMessage.saveId(chatId, it) }
+        }
+    }
+
+    private fun resetProgressAndShowMenu(chatId: Long, trainer: LearnWordsTrainer) {
+        trainer.resetProgress()
+
+        val lastId = dynamicMessage.getId(chatId)
+        val text = "✅ <b>Прогресс успешно сброшен!</b>"
+        val keyboard = service.getBackToMenuKeyboard()
+
+        if (lastId != null) {
+            service.editMessage(chatId, lastId, text, keyboard)
+        } else {
+            val newId = service.sendMessage(chatId, text, keyboard)
+            newId?.let { dynamicMessage.saveId(chatId, it) }
+        }
+    }
+
+    private fun sendPhotoAndUpdateFileId(trainer: LearnWordsTrainer, chatId: Long, word: Word) {
         val photoResult = when {
             !word.fileId.isNullOrBlank() -> {
                 word.fileId?.let {
@@ -79,48 +165,21 @@ class TelegramUpdateHandler(private val service: TelegramBotService) {
         }
     }
 
-    private fun sendStatistics(trainer: LearnWordsTrainer, chatId: Long) {
-        val text = trainer.getStatistics()?.let {
-            "Выучено ${it.learnedCount} из ${it.totalCount} слов | ${it.percent}%"
-        } ?: "Словарь пуст"
-
-        service.sendMessage(chatId, text)
-    }
-
-    private fun checkAnswerAndSendNextStep(trainer: LearnWordsTrainer, chatId: Long, data: String) {
-        val index = data.substringAfter(CALLBACK_DATA_ANSWER_PREFIX).toIntOrNull()
-
-        val currentQuestion = trainer.question
-
-        if (index != null && currentQuestion != null) {
-            if (trainer.checkAnswer(index)) {
-                service.sendMessage(chatId, "Правильно!")
-            } else {
-                val word = currentQuestion.correctAnswer
-                service.sendMessage(chatId, "Неправильно! ${word.text} – это ${word.translate}")
-            }
-            checkNextQuestionAndSend(trainer, chatId)
-        } else {
-            service.sendMessage(chatId, "Произошла ошибка или сессия устарела!")
-            service.sendMenu(chatId)
-        }
-    }
-
     private fun downloadAndImportWords(chatId: Long, trainer: LearnWordsTrainer, fileId: String) {
-        val fileInfo = service.getFileInfo(fileId) ?: return service.sendMessage(chatId, "Ошибка получения файла")
-
+        val fileInfo = service.getFileInfo(fileId) ?: return
         val file = File(fileInfo.fileUniqueId)
 
         val message = try {
             service.downloadFile(fileInfo.filePath, file)
             trainer.addWordsFromFile(file)
-            "Файл успешно обработан! Новые слова добавлены в ваш словарь."
+            "📂 <b>Файл обработан!</b> Новые слова добавлены."
         } catch (e: Exception) {
-            "Произошла ошибка при обработке файла: ${e.message}"
+            "⚠️ Ошибка импорта: ${e.message}"
         } finally {
             if (file.exists()) file.delete()
         }
 
         service.sendMessage(chatId, message)
+        showMainMenu(chatId)
     }
 }
