@@ -16,18 +16,27 @@ class TelegramUpdateHandler(
 
         val callbackData = update.callbackQuery?.data
         val messageText = update.message?.text
+        val messageId = update.message?.messageId
         val document = update.message?.document
 
         when {
             callbackData != null -> handleCallback(chatId, trainer, callbackData)
-            messageText != null -> handleMessage(chatId, messageText)
+            messageText != null -> handleMessage(chatId, messageText, messageId)
             document != null -> downloadAndImportWords(chatId, trainer, document.fileId)
         }
     }
 
     private fun handleCallback(chatId: Long, trainer: LearnWordsTrainer, data: String) {
         when {
-            data == CALLBACK_DATA_LEARN_WORDS -> checkNextQuestionAndSend(trainer, chatId)
+            data == CALLBACK_DATA_LEARN_WORDS -> {
+                val currentMenuId = dynamicMessage.getCurrentMessageId(chatId)
+
+                if (currentMenuId != null) {
+                    service.deleteMessage(chatId, currentMenuId)
+                    dynamicMessage.clear(chatId)
+                }
+                checkNextQuestionAndSend(trainer, chatId)
+            }
             data == CALLBACK_DATA_STATISTICS -> sendStatistics(trainer, chatId)
             data == CALLBACK_DATA_RESET -> resetProgressAndShowMenu(chatId, trainer)
             data == CALLBACK_DATA_MAIN_MENU -> showMainMenu(chatId)
@@ -35,36 +44,33 @@ class TelegramUpdateHandler(
         }
     }
 
-    private fun handleMessage(chatId: Long, text: String) {
-        if (text == "/start") {
-            showMainMenu(chatId)
-        } else {
-            service.sendMessage(chatId, "Вы написали: <i>$text</i>")
+    private fun handleMessage(chatId: Long, text: String, messageId: Long?) {
+        when (text) {
+            "/start" -> showMainMenu(chatId)
+            "/undo" -> {
+                performUndo(chatId)
+                messageId?.let { service.deleteMessage(chatId, it) }
+            }
+            else -> service.sendMessage(chatId, "Вы написали: <i>$text</i>")
         }
     }
 
     private fun showMainMenu(chatId: Long) {
-        val lastId = dynamicMessage.getId(chatId)
-        val menuText = "<b>Добро пожаловать в тренажер!</b>\n\nВыбери нужный раздел ниже:"
-        val menuKeyboard = service.getMainMenuKeyboard()
-
-        if (lastId != null) {
-            service.editMessage(chatId, lastId, menuText, menuKeyboard)
-        } else {
-            val newId = service.sendMessage(chatId, menuText, menuKeyboard)
-            newId?.let { dynamicMessage.saveId(chatId, it) }
-        }
+        updateScreen(
+            chatId = chatId,
+            text = "<b>Добро пожаловать в тренажер!</b>\n\nВыбери нужный раздел ниже:",
+            keyboard = service.getMainMenuKeyboard()
+        )
     }
 
     private fun checkAnswerAndSendNextStep(trainer: LearnWordsTrainer, chatId: Long, data: String) {
         val index = data.substringAfter(CALLBACK_DATA_ANSWER_PREFIX).toIntOrNull()
         val currentQuestion = trainer.question
-        val lastId = dynamicMessage.getId(chatId)
+        val lastId = dynamicMessage.getCurrentMessageId(chatId)
 
         if (index != null && currentQuestion != null && lastId != null) {
-            dynamicMessage.clearId(chatId)
-
             val isCorrect = trainer.checkAnswer(index)
+
             showAnswerStatus(chatId, lastId, currentQuestion.correctAnswer, isCorrect)
 
             checkNextQuestionAndSend(trainer, chatId)
@@ -75,27 +81,42 @@ class TelegramUpdateHandler(
 
     private fun showAnswerStatus(chatId: Long, messageId: Long, word: Word, isCorrect: Boolean) {
         val icon = if (isCorrect) "✅" else "❌"
+
         val text = """
             <b>$icon ${if (isCorrect) "Правильно!" else "Ошибка"}</b>
             Слово: <u>${word.text}</u> — это <b>${word.translate}</b>
         """.trimIndent()
 
-        service.editMessage(chatId, messageId, text, null)
+        val result = service.editMessage(chatId, messageId, text, null)
+
+        if (result == null) {
+            service.sendMessage(chatId, text)
+        }
     }
 
     private fun checkNextQuestionAndSend(trainer: LearnWordsTrainer, chatId: Long) {
         val question = trainer.getNextQuestion()
 
         if (question == null) {
-            service.sendMessage(chatId, "⭐ <b>Поздравляем!</b> Вы выучили все слова.")
-            showMainMenu(chatId)
+            updateScreen(
+                chatId = chatId,
+                text ="⭐ <b>Поздравляем!</b> Вы выучили все слова.",
+                keyboard = service.getMainMenuKeyboard(),
+                saveToHistory = true
+            )
             return
         }
 
+        dynamicMessage.clear(chatId)
+
         sendPhotoAndUpdateFileId(trainer, chatId, question.correctAnswer)
 
-        val questionId = service.sendQuestion(chatId, question)
-        questionId?.let { dynamicMessage.saveId(chatId, it) }
+        updateScreen(
+            chatId = chatId,
+            text = "Как переводится слово: <b>${question.correctAnswer.text}</b>?",
+            keyboard = service.getQuestionKeyboard(question),
+            saveToHistory = true
+        )
     }
 
     private fun sendStatistics(trainer: LearnWordsTrainer, chatId: Long) {
@@ -112,31 +133,17 @@ class TelegramUpdateHandler(
             📚 Всего в базе: <b>${stats.totalCount}</b>
         """.trimIndent()
 
-        val keyboard = service.getBackToMenuKeyboard()
-
-        val lastId = dynamicMessage.getId(chatId)
-
-        if (lastId != null) {
-            service.editMessage(chatId, lastId, text, keyboard)
-        } else {
-            val newId = service.sendMessage(chatId, text, keyboard)
-            newId?.let { dynamicMessage.saveId(chatId, it) }
-        }
+        updateScreen(chatId, text, service.getBackToMenuKeyboard())
     }
 
     private fun resetProgressAndShowMenu(chatId: Long, trainer: LearnWordsTrainer) {
         trainer.resetProgress()
 
-        val lastId = dynamicMessage.getId(chatId)
-        val text = "✅ <b>Прогресс успешно сброшен!</b>"
-        val keyboard = service.getBackToMenuKeyboard()
-
-        if (lastId != null) {
-            service.editMessage(chatId, lastId, text, keyboard)
-        } else {
-            val newId = service.sendMessage(chatId, text, keyboard)
-            newId?.let { dynamicMessage.saveId(chatId, it) }
-        }
+        updateScreen(
+            chatId = chatId,
+            text = "✅ <b>Прогресс успешно сброшен!</b>",
+            keyboard = service.getBackToMenuKeyboard()
+        )
     }
 
     private fun sendPhotoAndUpdateFileId(trainer: LearnWordsTrainer, chatId: Long, word: Word) {
@@ -181,5 +188,40 @@ class TelegramUpdateHandler(
 
         service.sendMessage(chatId, message)
         showMainMenu(chatId)
+    }
+
+    private fun performUndo(chatId: Long) {
+        val previousState = dynamicMessage.popPreviousState(chatId)
+        val currentId = dynamicMessage.getCurrentMessageId(chatId)
+
+        if (previousState != null && currentId != null) {
+            val result = service.editMessage(chatId, currentId, previousState.text, previousState.keyboard)
+
+            if (result == null) {
+                showMainMenu(chatId)
+            }
+        } else {
+            showMainMenu(chatId)
+        }
+    }
+
+    private fun updateScreen(chatId: Long, text: String, keyboard: ReplyMarkup?, saveToHistory: Boolean = true) {
+        val currentId = dynamicMessage.getCurrentMessageId(chatId)
+        var finalId: Long? = null
+
+        if (currentId != null) {
+            finalId = service.editMessage(chatId, currentId, text, keyboard)
+        }
+
+        if (finalId == null) {
+            finalId = service.sendMessage(chatId, text, keyboard)
+        }
+
+        if (saveToHistory && finalId != null) {
+            dynamicMessage.saveState(
+                chatId = chatId,
+                newState = MessageState(finalId, text, keyboard)
+            )
+        }
     }
 }

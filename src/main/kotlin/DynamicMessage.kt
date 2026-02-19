@@ -2,19 +2,37 @@ package org.example
 
 import java.util.concurrent.ConcurrentHashMap
 
+data class MessageState(
+    val messageId: Long,
+    val text: String,
+    val keyboard: ReplyMarkup?,
+)
+
 class DynamicMessage {
 
-    private val userMessages = ConcurrentHashMap<Long, Long>()
+    private val history = ConcurrentHashMap<Long, MutableList<MessageState>>()
 
-    fun saveId(chatId: Long, messageId: Long) {
-        userMessages[chatId] = messageId
+    fun saveState(chatId: Long, newState: MessageState) {
+        val states = history.getOrPut(chatId) { mutableListOf() }
+
+        if (states.lastOrNull() != newState) {
+            states.add(newState)
+        }
+
+        if (states.size > 5) states.removeAt(0)
     }
 
-    fun getId(chatId: Long): Long? {
-        return userMessages[chatId]
+    fun getCurrentMessageId(chatId: Long): Long? = history[chatId]?.lastOrNull()?.messageId
+
+    fun popPreviousState(chatId: Long): MessageState? {
+        val states = history[chatId] ?: return null
+
+        if (states.size < 2) return null
+
+        states.removeAt(states.size - 1)
+
+        return states.lastOrNull()
     }
 
-    fun clearId(chatId: Long) {
-        userMessages.remove(chatId)
-    }
+    fun clear(chatId: Long) { history.remove(chatId) }
 }

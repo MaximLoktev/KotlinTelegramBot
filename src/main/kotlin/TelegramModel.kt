@@ -21,6 +21,8 @@ data class Response(
 
 @Serializable
 data class Message(
+    @SerialName("message_id")
+    val messageId: Long,
     @SerialName("text")
     val text: String? = null,
     @SerialName("chat")
@@ -171,6 +173,26 @@ data class MessageResponse(
 
 @Serializable
 data class MessageData(
+    @SerialName("message_id")
+    val messageId: Long,
+)
+
+@Serializable
+data class TelegramResponse<T>(
+    @SerialName("ok")
+    val ok: Boolean,
+    @SerialName("result")
+    val result: T? = null,
+    @SerialName("description")
+    val description: String? = null,
+    @SerialName("error_code")
+    val errorCode: Int? = null,
+)
+
+@Serializable
+data class DeleteMessageRequest(
+    @SerialName("chat_id")
+    val chatId: Long,
     @SerialName("message_id")
     val messageId: Long,
 )

@@ -42,32 +42,51 @@ class TelegramBotService(private val botToken: String) {
         }.getOrDefault(emptyList())
     }
 
-    // --- МЕТОДЫ ОТПРАВКИ ---
+    // --- МЕТОД ОТПРАВКИ ---
 
     fun sendMessage(chatId: Long, text: String, replyMarkup: ReplyMarkup? = null): Long? {
         return sendBaseMessage(chatId, text, replyMarkup)
     }
 
-    fun sendQuestion(chatId: Long, question: Question): Long? {
-        val text = "Как переводится слово: <b>${question.correctAnswer.text}</b>?"
+    // --- МЕТОД РЕДАКТИРОВАНИЯ ---
 
-        val optionsButtons = question.variants.mapIndexed { index, word ->
-            InlineKeyboard(word.translate, "$CALLBACK_DATA_ANSWER_PREFIX$index")
-        }
-        val rows = optionsButtons.chunked(2).map { it }
-
-        val fullKeyboard = rows + listOf(listOf(InlineKeyboard("🏠 Меню", CALLBACK_DATA_MAIN_MENU)))
-        val keyboard = ReplyMarkup(fullKeyboard)
-
-        return sendBaseMessage(chatId, text, keyboard)
-    }
-
-    // --- МЕТОДЫ РЕДАКТИРОВАНИЯ ---
-
-    fun editMessage(chatId: Long, messageId: Long, text: String, keyboard: ReplyMarkup? = null): String? {
+    fun editMessage(chatId: Long, messageId: Long, text: String, keyboard: ReplyMarkup? = null): Long? {
         val requestBody = EditMessageRequest(chatId, messageId, text, keyboard, parseMode = "HTML")
 
-        return sendPostRequest("$baseUrl/editMessageText", json.encodeToString(requestBody))
+        val responseBody = sendPostRequest(
+            "$baseUrl/editMessageText",
+            json.encodeToString(requestBody)
+        ) ?: return null
+
+        return try {
+            val response = json.decodeFromString<TelegramResponse<MessageData>>(responseBody)
+
+            if (response.ok) {
+                response.result?.messageId
+            } else {
+                if (response.description?.contains("message is not modified") == true) {
+                    return messageId
+                }
+                println("Telegram API Error: ${response.description}")
+                null
+            }
+        } catch (e: Exception) {
+            println("Parsing error: ${e.message}")
+            null
+        }
+    }
+
+    // --- МЕТОД РЕДАКТИРОВАНИЯ ---
+
+    fun deleteMessage(chatId: Long, messageId: Long): Boolean {
+        val requestBody = DeleteMessageRequest(chatId, messageId)
+
+        val responseBody = sendPostRequest(
+            "$baseUrl/deleteMessage",
+            json.encodeToString(requestBody)
+        ) ?: return false
+
+        return responseBody.contains("\"ok\":true")
     }
 
     // --- КЛАВИАТУРЫ ---
@@ -84,6 +103,18 @@ class TelegramBotService(private val botToken: String) {
         return ReplyMarkup(listOf(
             listOf(InlineKeyboard("⬅️ В главное меню", CALLBACK_DATA_MAIN_MENU))
         ))
+    }
+
+    fun getQuestionKeyboard(question: Question): ReplyMarkup {
+        val optionsButtons = question.variants.mapIndexed { index, word ->
+            InlineKeyboard(word.translate, "$CALLBACK_DATA_ANSWER_PREFIX$index")
+        }
+
+        val rows = optionsButtons.chunked(2)
+
+        val fullKeyboard = rows + listOf(listOf(InlineKeyboard("🏠 Меню", CALLBACK_DATA_MAIN_MENU)))
+
+        return ReplyMarkup(fullKeyboard)
     }
 
     // --- МЕТОДЫ ОТПРАВКИ ФОТО ---
