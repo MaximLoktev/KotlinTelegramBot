@@ -21,6 +21,8 @@ data class Response(
 
 @Serializable
 data class Message(
+    @SerialName("message_id")
+    val messageId: Long,
     @SerialName("text")
     val text: String? = null,
     @SerialName("chat")
@@ -65,6 +67,8 @@ data class SendMessageRequest(
     val text: String,
     @SerialName("reply_markup")
     val replyMarkup: ReplyMarkup? = null,
+    @SerialName("parse_mode")
+    val parseMode: String,
 )
 
 @Serializable
@@ -79,6 +83,20 @@ data class InlineKeyboard(
     val text: String,
     @SerialName("callback_data")
     val callbackData: String,
+)
+
+@Serializable
+data class EditMessageRequest(
+    @SerialName("chat_id")
+    val chatId: Long,
+    @SerialName("message_id")
+    val messageId: Long,
+    @SerialName("text")
+    val text: String,
+    @SerialName("reply_markup")
+    val replyMarkup: ReplyMarkup? = null,
+    @SerialName("parse_mode")
+    val parseMode: String,
 )
 
 @Serializable
@@ -143,4 +161,38 @@ data class FileInfo(
     val fileSize: Long,
     @SerialName("file_path")
     val filePath: String,
+)
+
+@Serializable
+data class MessageResponse(
+    @SerialName("ok")
+    val ok: Boolean,
+    @SerialName("result")
+    val result: MessageData? = null,
+)
+
+@Serializable
+data class MessageData(
+    @SerialName("message_id")
+    val messageId: Long,
+)
+
+@Serializable
+data class TelegramResponse<T>(
+    @SerialName("ok")
+    val ok: Boolean,
+    @SerialName("result")
+    val result: T? = null,
+    @SerialName("description")
+    val description: String? = null,
+    @SerialName("error_code")
+    val errorCode: Int? = null,
+)
+
+@Serializable
+data class DeleteMessageRequest(
+    @SerialName("chat_id")
+    val chatId: Long,
+    @SerialName("message_id")
+    val messageId: Long,
 )

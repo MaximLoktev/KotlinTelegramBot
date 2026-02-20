@@ -2,7 +2,10 @@ package org.example
 
 import java.io.File
 
-class TelegramUpdateHandler(private val service: TelegramBotService) {
+class TelegramUpdateHandler(
+    private val service: TelegramBotService,
+    private val dynamicMessage: DynamicMessage = DynamicMessage(),
+) {
 
     private val trainers = HashMap<Long, LearnWordsTrainer>()
 
@@ -13,47 +16,137 @@ class TelegramUpdateHandler(private val service: TelegramBotService) {
 
         val callbackData = update.callbackQuery?.data
         val messageText = update.message?.text
+        val messageId = update.message?.messageId
         val document = update.message?.document
 
         when {
             callbackData != null -> handleCallback(chatId, trainer, callbackData)
-            messageText != null -> handleMessage(chatId, messageText)
+            messageText != null -> handleMessage(chatId, messageText, messageId)
             document != null -> downloadAndImportWords(chatId, trainer, document.fileId)
         }
     }
 
     private fun handleCallback(chatId: Long, trainer: LearnWordsTrainer, data: String) {
         when {
-            data == CALLBACK_DATA_LEARN_WORDS -> checkNextQuestionAndSend(trainer, chatId)
-            data == CALLBACK_DATA_STATISTICS -> sendStatistics(trainer, chatId)
-            data == CALLBACK_DATA_RESET -> {
-                trainer.resetProgress()
-                service.sendMessage(chatId, "Прогресс сброшен")
+            data == CALLBACK_DATA_LEARN_WORDS -> {
+                val currentMenuId = dynamicMessage.getCurrentMessageId(chatId)
+
+                if (currentMenuId != null) {
+                    service.deleteMessage(chatId, currentMenuId)
+                    dynamicMessage.clear(chatId)
+                }
+                checkNextQuestionAndSend(trainer, chatId)
             }
-            data == CALLBACK_DATA_MAIN_MENU -> service.sendMenu(chatId)
+            data == CALLBACK_DATA_STATISTICS -> sendStatistics(trainer, chatId)
+            data == CALLBACK_DATA_RESET -> resetProgressAndShowMenu(chatId, trainer)
+            data == CALLBACK_DATA_MAIN_MENU -> showMainMenu(chatId)
             data.startsWith(CALLBACK_DATA_ANSWER_PREFIX) -> checkAnswerAndSendNextStep(trainer, chatId, data)
         }
     }
 
-    private fun handleMessage(chatId: Long, text: String) {
-        if (text == "/start") service.sendMenu(chatId)
-        else service.sendMessage(chatId, "Вы написали: $text")
+    private fun handleMessage(chatId: Long, text: String, messageId: Long?) {
+        when (text) {
+            "/start" -> showMainMenu(chatId)
+            "/undo" -> {
+                performUndo(chatId)
+                messageId?.let { service.deleteMessage(chatId, it) }
+            }
+            else -> service.sendMessage(chatId, "Вы написали: <i>$text</i>")
+        }
+    }
+
+    private fun showMainMenu(chatId: Long) {
+        updateScreen(
+            chatId = chatId,
+            text = "<b>Добро пожаловать в тренажер!</b>\n\nВыбери нужный раздел ниже:",
+            keyboard = service.getMainMenuKeyboard()
+        )
+    }
+
+    private fun checkAnswerAndSendNextStep(trainer: LearnWordsTrainer, chatId: Long, data: String) {
+        val index = data.substringAfter(CALLBACK_DATA_ANSWER_PREFIX).toIntOrNull()
+        val currentQuestion = trainer.question
+        val lastId = dynamicMessage.getCurrentMessageId(chatId)
+
+        if (index != null && currentQuestion != null && lastId != null) {
+            val isCorrect = trainer.checkAnswer(index)
+
+            showAnswerStatus(chatId, lastId, currentQuestion.correctAnswer, isCorrect)
+
+            checkNextQuestionAndSend(trainer, chatId)
+        } else {
+            showMainMenu(chatId)
+        }
+    }
+
+    private fun showAnswerStatus(chatId: Long, messageId: Long, word: Word, isCorrect: Boolean) {
+        val icon = if (isCorrect) "✅" else "❌"
+
+        val text = """
+            <b>$icon ${if (isCorrect) "Правильно!" else "Ошибка"}</b>
+            Слово: <u>${word.text}</u> — это <b>${word.translate}</b>
+        """.trimIndent()
+
+        val result = service.editMessage(chatId, messageId, text, null)
+
+        if (result == null) {
+            service.sendMessage(chatId, text)
+        }
     }
 
     private fun checkNextQuestionAndSend(trainer: LearnWordsTrainer, chatId: Long) {
         val question = trainer.getNextQuestion()
 
         if (question == null) {
-            service.sendMessage(chatId, "Вы выучили все слова в базе!")
+            updateScreen(
+                chatId = chatId,
+                text ="⭐ <b>Поздравляем!</b> Вы выучили все слова.",
+                keyboard = service.getMainMenuKeyboard(),
+                saveToHistory = true
+            )
             return
         }
 
+        dynamicMessage.clear(chatId)
+
         sendPhotoAndUpdateFileId(trainer, chatId, question.correctAnswer)
 
-        service.sendQuestion(chatId, question)
+        updateScreen(
+            chatId = chatId,
+            text = "Как переводится слово: <b>${question.correctAnswer.text}</b>?",
+            keyboard = service.getQuestionKeyboard(question),
+            saveToHistory = true
+        )
     }
 
-    fun sendPhotoAndUpdateFileId(trainer: LearnWordsTrainer, chatId: Long, word: Word) {
+    private fun sendStatistics(trainer: LearnWordsTrainer, chatId: Long) {
+        val stats = trainer.getStatistics() ?: return
+
+        val doneSteps = stats.percent / 10
+        val progressBar = "🟩".repeat(doneSteps) + "⬜".repeat(10 - doneSteps)
+
+        val text = """
+            📊 <b>Твой прогресс:</b>
+            $progressBar ${stats.percent}%
+        
+            ✅ Выучено слов: <b>${stats.learnedCount}</b>
+            📚 Всего в базе: <b>${stats.totalCount}</b>
+        """.trimIndent()
+
+        updateScreen(chatId, text, service.getBackToMenuKeyboard())
+    }
+
+    private fun resetProgressAndShowMenu(chatId: Long, trainer: LearnWordsTrainer) {
+        trainer.resetProgress()
+
+        updateScreen(
+            chatId = chatId,
+            text = "✅ <b>Прогресс успешно сброшен!</b>",
+            keyboard = service.getBackToMenuKeyboard()
+        )
+    }
+
+    private fun sendPhotoAndUpdateFileId(trainer: LearnWordsTrainer, chatId: Long, word: Word) {
         val photoResult = when {
             !word.fileId.isNullOrBlank() -> {
                 word.fileId?.let {
@@ -79,48 +172,56 @@ class TelegramUpdateHandler(private val service: TelegramBotService) {
         }
     }
 
-    private fun sendStatistics(trainer: LearnWordsTrainer, chatId: Long) {
-        val text = trainer.getStatistics()?.let {
-            "Выучено ${it.learnedCount} из ${it.totalCount} слов | ${it.percent}%"
-        } ?: "Словарь пуст"
-
-        service.sendMessage(chatId, text)
-    }
-
-    private fun checkAnswerAndSendNextStep(trainer: LearnWordsTrainer, chatId: Long, data: String) {
-        val index = data.substringAfter(CALLBACK_DATA_ANSWER_PREFIX).toIntOrNull()
-
-        val currentQuestion = trainer.question
-
-        if (index != null && currentQuestion != null) {
-            if (trainer.checkAnswer(index)) {
-                service.sendMessage(chatId, "Правильно!")
-            } else {
-                val word = currentQuestion.correctAnswer
-                service.sendMessage(chatId, "Неправильно! ${word.text} – это ${word.translate}")
-            }
-            checkNextQuestionAndSend(trainer, chatId)
-        } else {
-            service.sendMessage(chatId, "Произошла ошибка или сессия устарела!")
-            service.sendMenu(chatId)
-        }
-    }
-
     private fun downloadAndImportWords(chatId: Long, trainer: LearnWordsTrainer, fileId: String) {
-        val fileInfo = service.getFileInfo(fileId) ?: return service.sendMessage(chatId, "Ошибка получения файла")
-
+        val fileInfo = service.getFileInfo(fileId) ?: return
         val file = File(fileInfo.fileUniqueId)
 
         val message = try {
             service.downloadFile(fileInfo.filePath, file)
             trainer.addWordsFromFile(file)
-            "Файл успешно обработан! Новые слова добавлены в ваш словарь."
+            "📂 <b>Файл обработан!</b> Новые слова добавлены."
         } catch (e: Exception) {
-            "Произошла ошибка при обработке файла: ${e.message}"
+            "⚠️ Ошибка импорта: ${e.message}"
         } finally {
             if (file.exists()) file.delete()
         }
 
         service.sendMessage(chatId, message)
+        showMainMenu(chatId)
+    }
+
+    private fun performUndo(chatId: Long) {
+        val previousState = dynamicMessage.popPreviousState(chatId)
+        val currentId = dynamicMessage.getCurrentMessageId(chatId)
+
+        if (previousState != null && currentId != null) {
+            val result = service.editMessage(chatId, currentId, previousState.text, previousState.keyboard)
+
+            if (result == null) {
+                showMainMenu(chatId)
+            }
+        } else {
+            showMainMenu(chatId)
+        }
+    }
+
+    private fun updateScreen(chatId: Long, text: String, keyboard: ReplyMarkup?, saveToHistory: Boolean = true) {
+        val currentId = dynamicMessage.getCurrentMessageId(chatId)
+        var finalId: Long? = null
+
+        if (currentId != null) {
+            finalId = service.editMessage(chatId, currentId, text, keyboard)
+        }
+
+        if (finalId == null) {
+            finalId = service.sendMessage(chatId, text, keyboard)
+        }
+
+        if (saveToHistory && finalId != null) {
+            dynamicMessage.saveState(
+                chatId = chatId,
+                newState = MessageState(finalId, text, keyboard)
+            )
+        }
     }
 }
