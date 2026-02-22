@@ -1,9 +1,15 @@
-package org.example
+package org.example.telegram
 
+import org.example.LearnWordsTrainer
+import org.example.Word
+import org.example.dataSource.DatabaseUserDictionary
+import org.example.dataSource.PATH_NAME
 import java.io.File
+import java.sql.Connection
 
 class TelegramUpdateHandler(
     private val service: TelegramBotService,
+    private val connection: Connection,
     private val dynamicMessage: DynamicMessage = DynamicMessage(),
 ) {
 
@@ -12,7 +18,15 @@ class TelegramUpdateHandler(
     fun handleUpdate(update: Update) {
         val chatId = update.message?.chat?.id ?: update.callbackQuery?.message?.chat?.id ?: return
 
-        val trainer = trainers.getOrPut(chatId) { LearnWordsTrainer(fileName = "$chatId.txt") }
+        ensureUserExists(chatId, getDisplayName(chatId, update))
+
+        val trainer = trainers.getOrPut(chatId) {
+            val dictionary = DatabaseUserDictionary(connection, chatId)
+            dictionary.loadInitialWordsIfEmpty(File(PATH_NAME))
+            dictionary.bindAllWordsToUser()
+
+            LearnWordsTrainer(userDictionary = dictionary)
+        }
 
         val callbackData = update.callbackQuery?.data
         val messageText = update.message?.text
@@ -168,7 +182,7 @@ class TelegramUpdateHandler(
 
         if (word.fileId.isNullOrBlank() && photoResult != null) {
             word.fileId = photoResult.fileId
-            trainer.saveDictionary()
+            trainer.setImageId(word.text, photoResult.fileId)
         }
     }
 
@@ -178,7 +192,7 @@ class TelegramUpdateHandler(
 
         val message = try {
             service.downloadFile(fileInfo.filePath, file)
-            trainer.addWordsFromFile(file)
+            trainer.updateDictionary(file)
             "📂 <b>Файл обработан!</b> Новые слова добавлены."
         } catch (e: Exception) {
             "⚠️ Ошибка импорта: ${e.message}"
@@ -222,6 +236,41 @@ class TelegramUpdateHandler(
                 chatId = chatId,
                 newState = MessageState(finalId, text, keyboard)
             )
+        }
+    }
+
+    private fun ensureUserExists(chatId: Long, username: String) {
+        val sql = """
+            INSERT INTO users (chat_id, username) 
+            VALUES (?, ?)
+            ON CONFLICT(chat_id) DO UPDATE SET username = excluded.username
+        """.trimIndent()
+
+        connection.prepareStatement(sql).use { stmt ->
+            stmt.setLong(1, chatId)
+            stmt.setString(2, username)
+            stmt.executeUpdate()
+        }
+    }
+
+    private fun getDisplayName(chatId: Long, update: Update): String {
+        val message = update.message ?: update.callbackQuery?.message
+        val chatTitle = message?.chat?.title
+
+        if (!chatTitle.isNullOrBlank()) { return "Группа: $chatTitle" }
+
+        val from = update.message?.from ?: update.callbackQuery?.from
+
+        return if (from != null) {
+            val fullName = "${from.firstName} ${from.lastName ?: ""}".trim()
+
+            if (!from.username.isNullOrBlank()) {
+                "@${from.username} ($fullName)"
+            } else {
+                fullName
+            }
+        } else {
+            "User_$chatId"
         }
     }
 }

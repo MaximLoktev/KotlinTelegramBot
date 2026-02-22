@@ -1,5 +1,7 @@
 package org.example
 
+import org.example.dataSource.FileUserDictionary
+
 /**
  * Вспомогательное расширение для очистки строки.
  * Оставляет буквы, цифры и одиночные пробелы внутри.
@@ -32,7 +34,7 @@ fun Question.asConsoleString(): String {
 }
 
 fun main() {
-    val trainer = LearnWordsTrainer()
+    val trainer = LearnWordsTrainer(userDictionary = FileUserDictionary())
 
     while (true) {
         println("""
