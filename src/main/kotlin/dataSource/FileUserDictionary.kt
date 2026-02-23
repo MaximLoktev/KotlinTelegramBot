@@ -6,17 +6,6 @@ import java.io.File
 const val PATH_NAME = "words.txt"
 const val MIN_CORRECT_ANSWERS = 3
 
-interface IUserDictionary {
-    fun getSize(): Int
-    fun getNumOfLearnedWords(): Int
-    fun getLearnedWords(): List<Word>
-    fun getUnlearnedWords(): List<Word>
-    fun setCorrectAnswersCount(word: String, correctAnswersCount: Int)
-    fun setImageId(word: String, imageId: String)
-    fun resetUserProgress()
-    fun updateDictionary(wordsFile: File)
-}
-
 class FileUserDictionary(
     private val fileName: String = PATH_NAME,
     private val learnedAnswerCount: Int = MIN_CORRECT_ANSWERS,
