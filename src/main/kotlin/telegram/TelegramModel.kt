@@ -1,4 +1,4 @@
-package org.example
+package org.example.telegram
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -20,9 +20,25 @@ data class Response(
 )
 
 @Serializable
+data class User(
+    @SerialName("id")
+    val id: Long,
+    @SerialName("is_bot")
+    val isBot: Boolean? = null,
+    @SerialName("first_name")
+    val firstName: String,
+    @SerialName("last_name")
+    val lastName: String? = null,
+    @SerialName("username")
+    val username: String? = null,
+)
+
+@Serializable
 data class Message(
     @SerialName("message_id")
     val messageId: Long,
+    @SerialName("from")
+    val from: User? = null,
     @SerialName("text")
     val text: String? = null,
     @SerialName("chat")
@@ -47,6 +63,8 @@ data class Document(
 
 @Serializable
 data class CallbackQuery(
+    @SerialName("from")
+    val from: User,
     @SerialName("data")
     val data: String,
     @SerialName("message")
@@ -57,6 +75,10 @@ data class CallbackQuery(
 data class Chat(
     @SerialName("id")
     val id: Long,
+    @SerialName("type")
+    val type: String? = null,
+    @SerialName("title")
+    val title: String? = null,
 )
 
 @Serializable

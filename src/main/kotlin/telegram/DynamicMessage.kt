@@ -1,4 +1,4 @@
-package org.example
+package org.example.telegram
 
 import java.util.concurrent.ConcurrentHashMap
 

@@ -1,6 +1,8 @@
-package org.example
+package org.example.telegram
 
 import kotlinx.serialization.json.Json
+import org.example.Question
+import org.example.dataSource.DatabaseInitializer
 import java.io.File
 import java.math.BigInteger
 import java.net.URI
@@ -10,6 +12,7 @@ import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.sql.DriverManager
 import java.util.Random
 
 const val TELEGRAM_BASE_URL = "https://api.telegram.org"
@@ -214,17 +217,20 @@ class TelegramBotService(private val botToken: String) {
 
 
 fun main(args: Array<String>) {
+    val connection = DriverManager.getConnection("jdbc:sqlite:data.db")
+    DatabaseInitializer.setup(connection)
+
     val botToken = args.getOrNull(0) ?: throw IllegalArgumentException("Укажите токен бота")
 
-    val service = TelegramBotService(botToken)
-    val updateHandler = TelegramUpdateHandler(service)
+    val botService = TelegramBotService(botToken)
+    val updateHandler = TelegramUpdateHandler(botService, connection)
 
     var lastUpdateId = 0L
 
     println("Бот запущен...")
 
     while (true) {
-        val updates = service.getUpdates(lastUpdateId)
+        val updates = botService.getUpdates(lastUpdateId)
         updates.forEach { updateHandler.handleUpdate(it) }
 
         if (updates.isNotEmpty()) {
