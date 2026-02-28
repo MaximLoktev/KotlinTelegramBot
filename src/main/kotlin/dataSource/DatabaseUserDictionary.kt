@@ -3,6 +3,7 @@ package org.example.dataSource
 import org.example.Word
 import java.io.File
 import java.sql.Connection
+import kotlin.text.Regex
 import kotlin.use
 
 class DatabaseUserDictionary(
@@ -11,9 +12,19 @@ class DatabaseUserDictionary(
     private val learnedAnswerCount: Int = MIN_CORRECT_ANSWERS,
 ) : IUserDictionary {
 
+    /// Properties ///
+
+    private val WORD_ALLOWED = Regex("^[a-zA-Zа-яА-Я0-9\\s\\-]+$")
+
+    private val IMAGE_ID_ALLOWED = Regex("^[a-zA-Z0-9_\\-]+$")
+
+    /// Init ///
+
     init {
         connection.createStatement().execute("PRAGMA foreign_keys = ON;")
     }
+
+    /// Methods ///
 
     fun loadInitialWordsIfEmpty(wordsFile: File) {
         val countSql = "SELECT COUNT(*) FROM words"
@@ -99,6 +110,17 @@ class DatabaseUserDictionary(
     }
 
     override fun setCorrectAnswersCount(word: String, correctAnswersCount: Int) {
+        if (containsSuspiciousPatterns(word)) { logSuspiciousActivity(word) }
+
+        val safeWord = validateInput(
+            value = word,
+            fieldName = "word",
+            maxLength = 80,
+            allowed = WORD_ALLOWED
+        )
+
+        val safeCount = validateCount(correctAnswersCount)
+
         val sql = """
             INSERT INTO user_answers (user_id, word_id, correct_answer_count)
             VALUES (
@@ -113,18 +135,36 @@ class DatabaseUserDictionary(
 
         connection.prepareStatement(sql).use { stmt ->
             stmt.setLong(1, chatId)
-            stmt.setString(2, word)
-            stmt.setInt(3, correctAnswersCount)
+            stmt.setString(2, safeWord)
+            stmt.setInt(3, safeCount)
             stmt.executeUpdate()
         }
     }
 
     override fun setImageId(word: String, imageId: String) {
+        if (containsSuspiciousPatterns(word)) { logSuspiciousActivity(word) }
+
+        if (containsSuspiciousPatterns(imageId)) { logSuspiciousActivity(imageId) }
+
+        val safeWord = validateInput(
+            value = word,
+            fieldName = "word",
+            maxLength = 80,
+            allowed = WORD_ALLOWED
+        )
+
+        val safeImageId = validateInput(
+            value = imageId,
+            fieldName = "imageId",
+            maxLength = 300,
+            allowed = IMAGE_ID_ALLOWED
+        )
+
         val sql = "UPDATE words SET file_id = ? WHERE text = ?"
 
         connection.prepareStatement(sql).use { stmt ->
-            stmt.setString(1, imageId)
-            stmt.setString(2, word)
+            stmt.setString(1, safeImageId)
+            stmt.setString(2, safeWord)
             stmt.executeUpdate()
         }
     }
@@ -170,24 +210,52 @@ class DatabaseUserDictionary(
                     val parts = line.split("|")
 
                     if (parts.size >= 2) {
-                        val text = parts[0].trim()
-                        val translate = parts[1].trim()
-                        val count = parts.getOrNull(2)?.trim()?.toIntOrNull() ?: 0
+                        val textRaw = parts[0]
+                        val translateRaw = parts[1]
+                        val countRaw = parts.getOrNull(2)?.trim()?.toIntOrNull() ?: 0
                         val imagePath = parts.getOrNull(3)?.trim()?.takeIf { it.isNotBlank() }
-                        val fileId = parts.getOrNull(4)?.trim()?.takeIf { it.isNotBlank() }
+                        val fileIdRaw = parts.getOrNull(4)?.trim()
 
-                        if (text.isNotEmpty() && translate.isNotEmpty()) {
-                            wordStmt.setString(1, text)
-                            wordStmt.setString(2, translate)
-                            wordStmt.setString(3, imagePath)
-                            wordStmt.setString(4, fileId)
-                            wordStmt.executeUpdate()
+                        if (containsSuspiciousPatterns(textRaw)) { logSuspiciousActivity(textRaw) }
+                        if (containsSuspiciousPatterns(translateRaw)) { logSuspiciousActivity(translateRaw) }
 
-                            answerStmt.setLong(1, chatId)
-                            answerStmt.setString(2, text)
-                            answerStmt.setInt(3, count)
-                            answerStmt.addBatch()
+                        val text = runCatching {
+                            validateInput(
+                                value = textRaw,
+                                fieldName = "word",
+                                maxLength = 80,
+                                allowed = WORD_ALLOWED
+                            )
+                        }.getOrNull() ?: return@forEach
+
+                        val translate = translateRaw.trim()
+                            .takeIf { it.isNotEmpty() && it.length <= 200 } ?: return@forEach
+
+                        val count = runCatching { validateCount(countRaw) }.getOrNull() ?: return@forEach
+
+                        val fileId = fileIdRaw?.let {
+                            if (containsSuspiciousPatterns(it)) { logSuspiciousActivity(it) }
+
+                            runCatching {
+                                validateInput(
+                                    value = it,
+                                    fieldName = "imageId",
+                                    maxLength = 300,
+                                    allowed = IMAGE_ID_ALLOWED
+                                )
+                            }.getOrNull()
                         }
+
+                        wordStmt.setString(1, text)
+                        wordStmt.setString(2, translate)
+                        wordStmt.setString(3, imagePath)
+                        wordStmt.setString(4, fileId)
+                        wordStmt.executeUpdate()
+
+                        answerStmt.setLong(1, chatId)
+                        answerStmt.setString(2, text)
+                        answerStmt.setInt(3, count)
+                        answerStmt.addBatch()
                     }
                 }
             }
@@ -224,5 +292,40 @@ class DatabaseUserDictionary(
             }
             result
         }
+    }
+
+    private fun validateInput(
+        value: String,
+        fieldName: String,
+        maxLength: Int,
+        allowed: Regex
+    ): String {
+        val trimmed = value.trim()
+
+        require(trimmed.isNotEmpty()) { "Пустое поле: $fieldName" }
+        require(trimmed.length <= maxLength) { "Слишком длинное поле: $fieldName" }
+        require(allowed.matches(trimmed)) { "Недопустимые символы в поле: $fieldName" }
+
+        return trimmed
+    }
+
+    private fun validateCount(count: Int): Int {
+        require(count >= 0) { "count не может быть отрицательным" }
+        require(count <= 1_000_000) { "count слишком большой" }
+        return count
+    }
+
+    private fun logSuspiciousActivity(input: String) {
+        println("⚠️ Подозрительный ввод обнаружен (chatId=$chatId): $input")
+    }
+
+    private fun containsSuspiciousPatterns(input: String): Boolean {
+        val suspicious = listOf(
+            "'", "\"", ";", "--", "/*", "*/",
+            "union", "select", "drop", "delete", "insert", "update", "or", "and"
+        )
+        val low = input.lowercase()
+
+        return suspicious.any { low.contains(it) }
     }
 }
