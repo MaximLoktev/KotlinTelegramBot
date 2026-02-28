@@ -12,19 +12,13 @@ class DatabaseUserDictionary(
     private val learnedAnswerCount: Int = MIN_CORRECT_ANSWERS,
 ) : IUserDictionary {
 
-    /// Properties ///
-
     private val WORD_ALLOWED = Regex("^[a-zA-Zа-яА-Я0-9\\s\\-]+$")
 
     private val IMAGE_ID_ALLOWED = Regex("^[a-zA-Z0-9_\\-]+$")
 
-    /// Init ///
-
     init {
         connection.createStatement().execute("PRAGMA foreign_keys = ON;")
     }
-
-    /// Methods ///
 
     fun loadInitialWordsIfEmpty(wordsFile: File) {
         val countSql = "SELECT COUNT(*) FROM words"
@@ -322,10 +316,15 @@ class DatabaseUserDictionary(
     private fun containsSuspiciousPatterns(input: String): Boolean {
         val suspicious = listOf(
             "'", "\"", ";", "--", "/*", "*/",
-            "union", "select", "drop", "delete", "insert", "update", "or", "and"
+            "union", "select", "drop", "delete", "insert", "update"
         )
+
         val low = input.lowercase()
 
-        return suspicious.any { low.contains(it) }
+        if (suspicious.any { low.contains(it) }) return true
+
+        val orAndRegex = Regex("\\b(or|and)\\b", RegexOption.IGNORE_CASE)
+
+        return orAndRegex.containsMatchIn(input)
     }
 }
